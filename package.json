@@ -1,0 +1,34 @@
+{
+  "name": "@ricartefelipe/mind-wallet-shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist",
+    "openapi"
+  ],
+  "exports": {
+    "./msw": {
+      "types": "./dist/msw.d.ts",
+      "import": "./dist/msw.js"
+    },
+    "./msw/browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js"
+    },
+    "./openapi": "./openapi/vuemind-wallet-openapi.yaml"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test:exports": "npm run build && node --input-type=module -e \"import('./dist/msw.js').then(({ createMindHandlers }) => console.log(createMindHandlers().length))\"",
+    "sync:apps": "./scripts/sync-into-apps.sh"
+  },
+  "peerDependencies": {
+    "msw": "^2.15.0"
+  },
+  "devDependencies": {
+    "msw": "^2.15.0",
+    "typescript": "~5.7.2"
+  }
+}

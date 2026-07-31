@@ -1,0 +1,369 @@
+openapi: 3.0.3
+info:
+  title: VueMind Wallet API
+  description: >
+    Contrato canônico da carteira digital de estudo VueMind. Este documento é a
+    fonte da verdade compartilhada entre o mock MSW (Vue v1) e as futuras
+    reimplementações de frontend (Angular, React, mobile) e do backend real em
+    Spring. Enquanto o Spring não existe, o MSW simula exatamente estas
+    respostas para que a troca de "mock" para "real" não exija mudar nenhuma
+    linha de `features/*` — apenas desligar o worker e apontar a baseURL.
+  version: '1.0.0'
+servers:
+  - url: /api/v1
+    description: Base path relativo — em dev/test é interceptado pelo MSW.
+
+tags:
+  - name: auth
+  - name: wallet
+  - name: beneficiaries
+  - name: transfers
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Autentica com email/senha mock e devolve um token opaco.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login bem-sucedido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Credenciais inválidas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /wallet/balance:
+    get:
+      tags: [wallet]
+      summary: Saldo disponível da conta autenticada.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Saldo atual.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Balance'
+
+  /wallet/transactions:
+    get:
+      tags: [wallet]
+      summary: Extrato com filtros opcionais de período e tipo.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TransactionType'
+      responses:
+        '200':
+          description: Lista de transações filtradas.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transaction'
+                required: [items]
+
+  /beneficiaries:
+    get:
+      tags: [beneficiaries]
+      summary: Lista favorecidos cadastrados.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de favorecidos.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Beneficiary'
+                required: [items]
+    post:
+      tags: [beneficiaries]
+      summary: Cadastra um novo favorecido.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBeneficiaryRequest'
+      responses:
+        '201':
+          description: Favorecido criado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Beneficiary'
+        '400':
+          description: Dados inválidos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /beneficiaries/{id}:
+    delete:
+      tags: [beneficiaries]
+      summary: Remove um favorecido pelo id.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Removido com sucesso.
+        '404':
+          description: Favorecido não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /transfers/pix:
+    post:
+      tags: [transfers]
+      summary: Executa uma transferência PIX para um favorecido existente.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >
+            Evita duplicar a transferência em caso de retry do cliente.
+            Mesma chave → mesmo comprovante devolvido, sem debitar de novo.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePixRequest'
+      responses:
+        '201':
+          description: PIX efetuado — comprovante da transferência.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transfer'
+        '400':
+          description: Requisição inválida (valor <= 0, favorecido inexistente).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Saldo insuficiente para completar a transferência.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /transfers/{id}:
+    get:
+      tags: [transfers]
+      summary: Consulta o comprovante de uma transferência já efetuada.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Comprovante encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transfer'
+        '404':
+          description: Transferência não encontrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Token opaco mock (`mock-jwt-demo`); no Spring real será um JWT.
+
+  schemas:
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: demo@vuemind.dev
+        password:
+          type: string
+          example: demo123
+      required: [email, password]
+
+    LoginResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          example: mock-jwt-demo
+        user:
+          $ref: '#/components/schemas/User'
+      required: [accessToken, user]
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+      required: [id, name, email]
+
+    Balance:
+      type: object
+      properties:
+        availableCents:
+          type: integer
+          description: Saldo em centavos (evita ponto flutuante).
+        currency:
+          type: string
+          example: BRL
+      required: [availableCents, currency]
+
+    TransactionType:
+      type: string
+      enum: [PIX_OUT, PIX_IN, TED]
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          $ref: '#/components/schemas/TransactionType'
+        amountCents:
+          type: integer
+        description:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        counterparty:
+          type: string
+      required: [id, type, amountCents, description, createdAt, counterparty]
+
+    Beneficiary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        pixKey:
+          type: string
+      required: [id, name, pixKey]
+
+    CreateBeneficiaryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        pixKey:
+          type: string
+      required: [name, pixKey]
+
+    CreatePixRequest:
+      type: object
+      properties:
+        beneficiaryId:
+          type: string
+        amountCents:
+          type: integer
+          description: Valor em centavos, deve ser positivo.
+      required: [beneficiaryId, amountCents]
+
+    Transfer:
+      type: object
+      properties:
+        id:
+          type: string
+        beneficiaryId:
+          type: string
+        amountCents:
+          type: integer
+        status:
+          type: string
+          enum: [COMPLETED]
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, beneficiaryId, amountCents, status, createdAt]
+
+    ApiError:
+      type: object
+      description: >
+        Formato único de erro do contrato — `code` é a chave de negócio
+        (ex.: INSUFFICIENT_FUNDS), `message` é o texto amigável, e
+        `correlationId` amarra o erro ao log do servidor (MSW ou Spring).
+      properties:
+        code:
+          type: string
+          example: INSUFFICIENT_FUNDS
+        message:
+          type: string
+        correlationId:
+          type: string
+          format: uuid
+      required: [code, message, correlationId]
