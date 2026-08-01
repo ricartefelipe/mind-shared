@@ -3,7 +3,6 @@ import { http, HttpResponse, type RequestHandler } from 'msw'
 export type MindHandlerOptions = {
   apiBasePath?: string
   systemSlug?: string
-  totalRecallUrl?: string
 }
 
 type MockUser = {
@@ -38,7 +37,6 @@ type Db = {
   idempotency: Map<string, Transfer>
 }
 
-const TOTALRECALL_LOGIN_TIMEOUT_MS = 4_000
 const MOCK_TOKEN = 'mock-jwt-demo'
 
 function createDb(): Db {
@@ -76,63 +74,13 @@ function endpoint(basePath: string, path: string): string {
   return `*${basePath}${path}`
 }
 
-async function loginTotalRecall(
-  totalRecallUrl: string | undefined,
-  email: string,
-  password: string,
-  system: string,
-): Promise<{ valid: true; profile: { name: string; email: string } } | null> {
-  if (!totalRecallUrl) return null
-
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TOTALRECALL_LOGIN_TIMEOUT_MS)
-  try {
-    const response = await fetch(`${totalRecallUrl.replace(/\/$/, '')}/api/v1/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, system }),
-      signal: controller.signal,
-    })
-    const data = (await response.json()) as {
-      valid?: boolean
-      profile?: { name?: string; email?: string }
-    }
-    if (!data.valid || !data.profile?.email) return null
-    return {
-      valid: true,
-      profile: { name: data.profile.name ?? '', email: data.profile.email },
-    }
-  } catch {
-    return null
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
 export function createMindHandlers(options: MindHandlerOptions = {}): RequestHandler[] {
   const apiBasePath = options.apiBasePath ?? '/api/v1'
-  const systemSlug = options.systemSlug ?? 'mind'
   const db = createDb()
 
   return [
     http.post(endpoint(apiBasePath, '/auth/login'), async ({ request }) => {
       const body = (await request.json()) as { email: string; password: string }
-      const totalRecall = await loginTotalRecall(
-        options.totalRecallUrl,
-        body.email,
-        body.password,
-        systemSlug,
-      )
-      if (totalRecall) {
-        return HttpResponse.json({
-          accessToken: MOCK_TOKEN,
-          user: {
-            id: db.user.id,
-            name: totalRecall.profile.name || db.user.name,
-            email: totalRecall.profile.email,
-          },
-        })
-      }
       if (body.email !== db.user.email || body.password !== db.user.password) {
         return HttpResponse.json(
           error(
