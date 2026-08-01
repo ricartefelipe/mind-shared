@@ -28,13 +28,11 @@ import { createMindHandlers } from '@ricartefelipe/mind-wallet-shared/msw'
 export const handlers = createMindHandlers({
   apiBasePath: '/api/v1',
   systemSlug: 'vuemind',
-  totalRecallUrl: totalRecallBaseUrl(),
 })
 ```
 
-`totalRecallUrl` é opcional. Quando presente, o login consulta o TotalRecall
-por até 4 segundos; se a consulta falhar ou expirar, o mock local continua
-disponível.
+O login mock valida apenas as credenciais demo locais (`demo@vuemind.dev` /
+`demo123`). TotalRecall não participa da autenticação do produto.
 
 ## Contrato
 

@@ -3,14 +3,28 @@ import { http, HttpResponse, type RequestHandler } from 'msw'
 export type MindHandlerOptions = {
   apiBasePath?: string
   systemSlug?: string
-  totalRecallUrl?: string
+  users?: MindUserStore
 }
 
-type MockUser = {
+export type MindUser = {
   id: string
   name: string
   email: string
   password: string
+  enabled: boolean
+  role?: string
+  expiresAt?: string
+}
+
+export type MindUserStore = Map<string, MindUser>
+
+export type TotalRecallUserRequest = {
+  email: string
+  name?: string
+  password?: string
+  role?: string
+  expiresAt?: string
+  action?: 'upsert' | 'disable' | 'revoke'
 }
 
 type Beneficiary = { id: string; name: string; pixKey: string }
@@ -30,7 +44,7 @@ type Transfer = {
   createdAt: string
 }
 type Db = {
-  user: MockUser
+  users: MindUserStore
   availableCents: number
   beneficiaries: Beneficiary[]
   transactions: Transaction[]
@@ -38,12 +52,11 @@ type Db = {
   idempotency: Map<string, Transfer>
 }
 
-const TOTALRECALL_LOGIN_TIMEOUT_MS = 4_000
 const MOCK_TOKEN = 'mock-jwt-demo'
 
 function createDb(): Db {
   return {
-    user: { id: 'u1', name: 'Felipe Demo', email: 'demo@vuemind.dev', password: 'demo123' },
+    users: createMindUserStore(),
     availableCents: 250_000,
     beneficiaries: [
       { id: 'b1', name: 'Ana Silva', pixKey: 'ana@email.com' },
@@ -64,6 +77,58 @@ function createDb(): Db {
   }
 }
 
+export function createMindUserStore(): MindUserStore {
+  return new Map([
+    [
+      'demo@vuemind.dev',
+      {
+        id: 'u1',
+        name: 'Felipe Demo',
+        email: 'demo@vuemind.dev',
+        password: 'demo123',
+        enabled: true,
+      },
+    ],
+  ])
+}
+
+export function provisionMindUser(
+  users: MindUserStore,
+  request: TotalRecallUserRequest,
+): MindUser {
+  const action = request.action ?? 'upsert'
+  const existing = users.get(request.email)
+
+  if (action === 'upsert') {
+    if (!request.email?.trim() || !request.name?.trim() || !request.password?.trim()) {
+      throw new Error('Email, nome e senha são obrigatórios para provisionar um usuário.')
+    }
+    const user: MindUser = {
+      id: existing?.id ?? request.email,
+      email: request.email,
+      name: request.name,
+      password: request.password,
+      enabled: true,
+      role: request.role,
+      expiresAt: request.expiresAt,
+    }
+    users.set(user.email, user)
+    return user
+  }
+
+  if (!existing) {
+    throw new Error('Usuário não encontrado.')
+  }
+
+  const user: MindUser = {
+    ...existing,
+    enabled: false,
+    expiresAt: action === 'revoke' ? new Date().toISOString() : existing.expiresAt,
+  }
+  users.set(user.email, user)
+  return user
+}
+
 function correlationId(): string {
   return crypto.randomUUID()
 }
@@ -76,64 +141,19 @@ function endpoint(basePath: string, path: string): string {
   return `*${basePath}${path}`
 }
 
-async function loginTotalRecall(
-  totalRecallUrl: string | undefined,
-  email: string,
-  password: string,
-  system: string,
-): Promise<{ valid: true; profile: { name: string; email: string } } | null> {
-  if (!totalRecallUrl) return null
-
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TOTALRECALL_LOGIN_TIMEOUT_MS)
-  try {
-    const response = await fetch(`${totalRecallUrl.replace(/\/$/, '')}/api/v1/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, system }),
-      signal: controller.signal,
-    })
-    const data = (await response.json()) as {
-      valid?: boolean
-      profile?: { name?: string; email?: string }
-    }
-    if (!data.valid || !data.profile?.email) return null
-    return {
-      valid: true,
-      profile: { name: data.profile.name ?? '', email: data.profile.email },
-    }
-  } catch {
-    return null
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
 export function createMindHandlers(options: MindHandlerOptions = {}): RequestHandler[] {
   const apiBasePath = options.apiBasePath ?? '/api/v1'
-  const systemSlug = options.systemSlug ?? 'mind'
   const db = createDb()
+  if (options.users) {
+    db.users = options.users
+  }
 
   return [
     http.post(endpoint(apiBasePath, '/auth/login'), async ({ request }) => {
       const body = (await request.json()) as { email: string; password: string }
-      const totalRecall = await loginTotalRecall(
-        options.totalRecallUrl,
-        body.email,
-        body.password,
-        systemSlug,
-      )
-      if (totalRecall) {
-        return HttpResponse.json({
-          accessToken: MOCK_TOKEN,
-          user: {
-            id: db.user.id,
-            name: totalRecall.profile.name || db.user.name,
-            email: totalRecall.profile.email,
-          },
-        })
-      }
-      if (body.email !== db.user.email || body.password !== db.user.password) {
+      const user = db.users.get(body.email)
+      const isExpired = user?.expiresAt ? new Date(user.expiresAt) <= new Date() : false
+      if (!user || !user.enabled || isExpired || body.password !== user.password) {
         return HttpResponse.json(
           error(
             'INVALID_CREDENTIALS',
@@ -145,8 +165,25 @@ export function createMindHandlers(options: MindHandlerOptions = {}): RequestHan
       }
       return HttpResponse.json({
         accessToken: MOCK_TOKEN,
-        user: { id: db.user.id, name: db.user.name, email: db.user.email },
+        user: { id: user.id, name: user.name, email: user.email },
       })
+    }),
+    http.post('*/internal/v1/totalrecall/users', async ({ request }) => {
+      const body = (await request.json()) as TotalRecallUserRequest
+      try {
+        const user = provisionMindUser(db.users, body)
+        return HttpResponse.json({
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          enabled: user.enabled,
+          ...(user.role ? { role: user.role } : {}),
+          ...(user.expiresAt ? { expiresAt: user.expiresAt } : {}),
+        })
+      } catch (exception) {
+        const message = exception instanceof Error ? exception.message : 'Requisição de provisionamento inválida.'
+        return HttpResponse.json(error('INVALID_PROVISION_REQUEST', message), { status: 400 })
+      }
     }),
     http.get(endpoint(apiBasePath, '/wallet/balance'), () =>
       HttpResponse.json({ availableCents: db.availableCents, currency: 'BRL' }),
