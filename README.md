@@ -31,8 +31,10 @@ export const handlers = createMindHandlers({
 })
 ```
 
-O login mock valida apenas as credenciais demo locais (`demo@vuemind.dev` /
-`demo123`). TotalRecall não participa da autenticação do produto.
+O login mock (MSW) valida as credenciais demo locais (`demo@vuemind.dev` /
+`demo123`). Em Pages (`build:pages`), MSW fica desligado e o frontend aponta
+para a SpringMind Wallet API live — autenticação nativa `/auth/login`.
+TotalRecall só provisiona usuários nessa API; não é modo de login do produto.
 
 ## Contrato
 
