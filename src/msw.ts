@@ -1,5 +1,6 @@
 import { http, HttpResponse, type RequestHandler } from 'msw'
-import type { PixKeyType } from './pixKey.js'
+import { assertValidPixKey, type PixKeyType } from './pixKey.js'
+import { buildQrPayload } from './qrPayload.js'
 
 export type MindHandlerOptions = {
   apiBasePath?: string
@@ -126,7 +127,7 @@ function createDb(): Db {
     dailySpentCents: 0,
     beneficiaries: [
       { id: 'b1', name: 'Ana Silva', pixKey: 'ana@email.com', pixKeyType: 'EMAIL' },
-      { id: 'b2', name: 'Mercado Central', pixKey: '11222333000181', pixKeyType: 'CPF' },
+      { id: 'b2', name: 'Mercado Central', pixKey: '11222333000', pixKeyType: 'CPF' },
     ],
     transactions: [
       {
@@ -171,7 +172,29 @@ function createDb(): Db {
       },
     ],
     transfers: [],
-    notifications: [],
+    notifications: [
+      {
+        id: 'n1',
+        title: 'PIX recebido',
+        body: 'Você recebeu um PIX de R$ 500,00 de Carlos.',
+        read: false,
+        createdAt: '2026-07-20T10:00:05.000Z',
+      },
+      {
+        id: 'n2',
+        title: 'Limite diário próximo',
+        body: 'Você já utilizou uma parte relevante do seu limite diário de PIX.',
+        read: false,
+        createdAt: '2026-07-24T18:00:00.000Z',
+      },
+      {
+        id: 'n3',
+        title: 'Complete seu onboarding',
+        body: 'Cadastre um favorecido e faça seu primeiro PIX para liberar todo o app.',
+        read: false,
+        createdAt: '2026-07-25T09:00:00.000Z',
+      },
+    ],
     onboarding: createOnboardingState(),
     idempotency: new Map(),
   }
@@ -249,6 +272,29 @@ function resolveTransferCounterparty(db: Db, transfer: Transfer): string {
   return transfer.pixKey ?? 'Destinatário'
 }
 
+function completeTransfer(db: Db, transfer: Transfer, nowIso: string): void {
+  db.availableCents -= transfer.amountCents
+  db.dailySpentCents += transfer.amountCents
+  transfer.status = 'COMPLETED'
+  const counterparty = resolveTransferCounterparty(db, transfer)
+  db.transactions.unshift({
+    id: crypto.randomUUID(),
+    type: 'PIX_OUT',
+    amountCents: transfer.amountCents,
+    description: `PIX para ${counterparty}`,
+    createdAt: nowIso,
+    counterparty,
+  })
+  markOnboardingStep(db.onboarding, 'FIRST_PIX')
+  db.notifications.unshift({
+    id: crypto.randomUUID(),
+    title: 'PIX enviado',
+    body: `Transferência de ${transfer.amountCents} centavos para ${counterparty} foi concluída.`,
+    read: false,
+    createdAt: nowIso,
+  })
+}
+
 function processDueScheduledTransfers(db: Db, now = new Date()): void {
   const nowIso = now.toISOString()
   for (const transfer of db.transfers) {
@@ -265,25 +311,18 @@ function processDueScheduledTransfers(db: Db, now = new Date()): void {
       })
       continue
     }
-    db.availableCents -= transfer.amountCents
-    db.dailySpentCents += transfer.amountCents
-    transfer.status = 'COMPLETED'
-    const counterparty = resolveTransferCounterparty(db, transfer)
-    db.transactions.unshift({
-      id: crypto.randomUUID(),
-      type: 'PIX_OUT',
-      amountCents: transfer.amountCents,
-      description: `PIX para ${counterparty}`,
-      createdAt: nowIso,
-      counterparty,
-    })
-    db.notifications.unshift({
-      id: crypto.randomUUID(),
-      title: 'PIX agendado concluído',
-      body: `Transferência de ${transfer.amountCents} centavos para ${counterparty} foi concluída.`,
-      read: false,
-      createdAt: nowIso,
-    })
+    if (db.dailySpentCents + transfer.amountCents > db.dailyLimitCents) {
+      transfer.status = 'FAILED'
+      db.notifications.unshift({
+        id: crypto.randomUUID(),
+        title: 'Transferência agendada falhou',
+        body: 'Limite diário insuficiente para concluir a transferência agendada.',
+        read: false,
+        createdAt: nowIso,
+      })
+      continue
+    }
+    completeTransfer(db, transfer, nowIso)
   }
 }
 
@@ -309,6 +348,7 @@ export function createMindHandlers(options: MindHandlerOptions = {}): RequestHan
           { status: 401 },
         )
       }
+      markOnboardingStep(db.onboarding, 'PROFILE_OK')
       return HttpResponse.json({
         accessToken: MOCK_TOKEN,
         user: { id: user.id, name: user.name, email: user.email },
@@ -386,13 +426,22 @@ export function createMindHandlers(options: MindHandlerOptions = {}): RequestHan
         pixKey: string
         pixKeyType?: PixKeyType
       }
+      const requestCorrelationId = request.headers.get('X-Correlation-Id') ?? correlationId()
       if (!body.name?.trim() || !body.pixKey?.trim() || !body.pixKeyType) {
         return HttpResponse.json(
           error(
             'INVALID_BENEFICIARY',
             'Nome, chave PIX e tipo da chave são obrigatórios.',
-            request.headers.get('X-Correlation-Id') ?? correlationId(),
+            requestCorrelationId,
           ),
+          { status: 400 },
+        )
+      }
+      try {
+        assertValidPixKey(body.pixKeyType, body.pixKey)
+      } catch {
+        return HttpResponse.json(
+          error('INVALID_PIX_KEY', 'Chave PIX inválida para o tipo informado.', requestCorrelationId),
           { status: 400 },
         )
       }
@@ -403,6 +452,7 @@ export function createMindHandlers(options: MindHandlerOptions = {}): RequestHan
         pixKeyType: body.pixKeyType,
       }
       db.beneficiaries.push(beneficiary)
+      markOnboardingStep(db.onboarding, 'FIRST_BENEFICIARY')
       return HttpResponse.json(beneficiary, { status: 201 })
     }),
     http.delete(endpoint(apiBasePath, '/beneficiaries/:id'), ({ params }) => {
@@ -417,66 +467,201 @@ export function createMindHandlers(options: MindHandlerOptions = {}): RequestHan
       return new HttpResponse(null, { status: 204 })
     }),
     http.post(endpoint(apiBasePath, '/transfers/pix'), async ({ request }) => {
-      const idempotencyKey = request.headers.get('Idempotency-Key') ?? crypto.randomUUID()
-      const body = (await request.json()) as { beneficiaryId: string; amountCents: number }
-      const cached = db.idempotency.get(idempotencyKey)
-      if (cached) return HttpResponse.json(cached, { status: 201 })
-      const beneficiary = db.beneficiaries.find((item) => item.id === body.beneficiaryId)
+      const idempotencyKey = request.headers.get('Idempotency-Key')
+      if (idempotencyKey) {
+        const cached = db.idempotency.get(idempotencyKey)
+        if (cached) return HttpResponse.json(cached, { status: 201 })
+      }
+
+      const body = (await request.json()) as {
+        beneficiaryId?: string
+        pixKey?: string
+        pixKeyType?: PixKeyType
+        amountCents: number
+        scheduledFor?: string
+      }
       const requestCorrelationId = request.headers.get('X-Correlation-Id') ?? correlationId()
-      if (!beneficiary) {
-        return HttpResponse.json(
-          error('BENEFICIARY_NOT_FOUND', 'Favorecido não encontrado.', requestCorrelationId),
-          { status: 400 },
-        )
-      }
-      if (!Number.isInteger(body.amountCents) || body.amountCents <= 0) {
-        return HttpResponse.json(
-          error('INVALID_AMOUNT', 'O valor da transferência deve ser positivo.', requestCorrelationId),
-          { status: 400 },
-        )
-      }
-      if (db.availableCents < body.amountCents) {
+      const hasBeneficiary = Boolean(body.beneficiaryId?.trim())
+      const hasPixKeyPair = Boolean(body.pixKey?.trim() && body.pixKeyType)
+
+      if (hasBeneficiary === hasPixKeyPair) {
         return HttpResponse.json(
           error(
-            'INSUFFICIENT_FUNDS',
-            'Saldo insuficiente para completar essa transferência.',
+            'VALIDATION_ERROR',
+            'Informe beneficiaryId ou o par pixKey + pixKeyType, nunca ambos.',
             requestCorrelationId,
           ),
-          { status: 409 },
+          { status: 400 },
         )
       }
-      db.availableCents -= body.amountCents
-      db.dailySpentCents += body.amountCents
+
+      if (!Number.isInteger(body.amountCents) || body.amountCents <= 0) {
+        return HttpResponse.json(
+          error(
+            'VALIDATION_ERROR',
+            'O valor da transferência deve ser um inteiro positivo.',
+            requestCorrelationId,
+          ),
+          { status: 400 },
+        )
+      }
+
+      let beneficiaryId: string | undefined
+      let pixKey: string | undefined
+      let pixKeyType: PixKeyType | undefined
+      let counterparty = 'Destinatário'
+
+      if (hasBeneficiary) {
+        const beneficiary = db.beneficiaries.find((item) => item.id === body.beneficiaryId)
+        if (!beneficiary) {
+          return HttpResponse.json(
+            error('BENEFICIARY_NOT_FOUND', 'Favorecido não encontrado.', requestCorrelationId),
+            { status: 400 },
+          )
+        }
+        beneficiaryId = beneficiary.id
+        pixKey = beneficiary.pixKey
+        pixKeyType = beneficiary.pixKeyType
+        counterparty = beneficiary.name
+      } else {
+        try {
+          assertValidPixKey(body.pixKeyType!, body.pixKey!)
+        } catch {
+          return HttpResponse.json(
+            error('INVALID_PIX_KEY', 'Chave PIX inválida para o tipo informado.', requestCorrelationId),
+            { status: 400 },
+          )
+        }
+        pixKey = body.pixKey
+        pixKeyType = body.pixKeyType
+        counterparty = body.pixKey!
+      }
+
+      const now = new Date()
+      const nowIso = now.toISOString()
+      const scheduledFor =
+        typeof body.scheduledFor === 'string' && body.scheduledFor.length > 0
+          ? body.scheduledFor
+          : undefined
+      if (scheduledFor && Number.isNaN(new Date(scheduledFor).getTime())) {
+        return HttpResponse.json(
+          error('VALIDATION_ERROR', 'scheduledFor deve ser uma data/hora válida.', requestCorrelationId),
+          { status: 400 },
+        )
+      }
+      const isScheduled = Boolean(scheduledFor)
+
+      if (!isScheduled) {
+        if (db.availableCents < body.amountCents) {
+          return HttpResponse.json(
+            error(
+              'INSUFFICIENT_FUNDS',
+              'Saldo insuficiente para completar essa transferência.',
+              requestCorrelationId,
+            ),
+            { status: 409 },
+          )
+        }
+        if (db.dailySpentCents + body.amountCents > db.dailyLimitCents) {
+          return HttpResponse.json(
+            error(
+              'DAILY_LIMIT_EXCEEDED',
+              'Limite diário de PIX excedido para essa transferência.',
+              requestCorrelationId,
+            ),
+            { status: 409 },
+          )
+        }
+      }
+
       const transfer: Transfer = {
         id: crypto.randomUUID(),
-        beneficiaryId: body.beneficiaryId,
+        ...(beneficiaryId ? { beneficiaryId } : {}),
+        ...(pixKey ? { pixKey } : {}),
+        ...(pixKeyType ? { pixKeyType } : {}),
         amountCents: body.amountCents,
-        status: 'COMPLETED',
-        createdAt: new Date().toISOString(),
+        status: isScheduled ? 'SCHEDULED' : 'COMPLETED',
+        createdAt: nowIso,
+        ...(scheduledFor ? { scheduledFor } : {}),
         endToEndId: `E${crypto.randomUUID().replace(/-/g, '').slice(0, 32)}`,
         correlationId: requestCorrelationId,
       }
+
       db.transfers.push(transfer)
-      db.transactions.unshift({
-        id: crypto.randomUUID(),
-        type: 'PIX_OUT',
-        amountCents: body.amountCents,
-        description: `PIX para ${beneficiary.name}`,
-        createdAt: transfer.createdAt,
-        counterparty: beneficiary.name,
-      })
-      db.idempotency.set(idempotencyKey, transfer)
+
+      if (!isScheduled) {
+        db.availableCents -= body.amountCents
+        db.dailySpentCents += body.amountCents
+        db.transactions.unshift({
+          id: crypto.randomUUID(),
+          type: 'PIX_OUT',
+          amountCents: body.amountCents,
+          description: `PIX para ${counterparty}`,
+          createdAt: nowIso,
+          counterparty,
+        })
+        markOnboardingStep(db.onboarding, 'FIRST_PIX')
+        db.notifications.unshift({
+          id: crypto.randomUUID(),
+          title: 'PIX enviado',
+          body: `Transferência de ${body.amountCents} centavos para ${counterparty} foi concluída.`,
+          read: false,
+          createdAt: nowIso,
+        })
+      }
+
+      if (idempotencyKey) {
+        db.idempotency.set(idempotencyKey, transfer)
+      }
+
       return HttpResponse.json(transfer, { status: 201 })
+    }),
+    http.get(endpoint(apiBasePath, '/transfers/pix/qr-payload'), ({ request }) => {
+      const url = new URL(request.url)
+      const amountCents = Number.parseInt(url.searchParams.get('amountCents') ?? '', 10)
+      const pixKey = url.searchParams.get('pixKey')?.trim() ?? ''
+      const requestCorrelationId = request.headers.get('X-Correlation-Id') ?? correlationId()
+      if (!Number.isInteger(amountCents) || amountCents <= 0 || !pixKey) {
+        return HttpResponse.json(
+          error(
+            'VALIDATION_ERROR',
+            'amountCents e pixKey são obrigatórios e amountCents deve ser positivo.',
+            requestCorrelationId,
+          ),
+          { status: 400 },
+        )
+      }
+      return HttpResponse.json({ payload: buildQrPayload(amountCents, pixKey) })
     }),
     http.get(endpoint(apiBasePath, '/transfers/:id'), ({ params }) => {
       const transfer = db.transfers.find((item) => item.id === params.id)
       if (!transfer) {
         return HttpResponse.json(
-          error('TRANSFER_NOT_FOUND', 'Erro ao processar a transferência.'),
+          error('TRANSFER_NOT_FOUND', 'Transferência não encontrada.'),
           { status: 404 },
         )
       }
       return HttpResponse.json(transfer)
+    }),
+    http.get(endpoint(apiBasePath, '/notifications'), () =>
+      HttpResponse.json({ items: db.notifications }),
+    ),
+    http.post(endpoint(apiBasePath, '/notifications/read-all'), () => {
+      for (const notification of db.notifications) {
+        notification.read = true
+      }
+      return new HttpResponse(null, { status: 204 })
+    }),
+    http.post(endpoint(apiBasePath, '/notifications/:id/read'), ({ params }) => {
+      const notification = db.notifications.find((item) => item.id === params.id)
+      if (!notification) {
+        return HttpResponse.json(
+          error('NOTIFICATION_NOT_FOUND', 'Notificação não encontrada.'),
+          { status: 404 },
+        )
+      }
+      notification.read = true
+      return new HttpResponse(null, { status: 204 })
     }),
   ]
 }

@@ -29,7 +29,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test test/totalrecall-provision.test.mjs test/pix-key.test.mjs test/wallet-handlers.test.mjs",
+    "test": "npm run build && node --test test/totalrecall-provision.test.mjs test/pix-key.test.mjs test/wallet-handlers.test.mjs test/pix-notifications.test.mjs",
     "test:exports": "npm run build && node --input-type=module -e \"import('./dist/msw.js').then(({ createMindHandlers }) => console.log(createMindHandlers().length))\"",
     "sync:apps": "./scripts/sync-into-apps.sh"
   },
