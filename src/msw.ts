@@ -1,4 +1,5 @@
 import { http, HttpResponse, type RequestHandler } from 'msw'
+import type { PixKeyType } from './pixKey.js'
 
 export type MindHandlerOptions = {
   apiBasePath?: string
@@ -27,7 +28,13 @@ export type TotalRecallUserRequest = {
   action?: 'upsert' | 'disable' | 'revoke'
 }
 
-type Beneficiary = { id: string; name: string; pixKey: string }
+type Beneficiary = {
+  id: string
+  name: string
+  pixKey: string
+  pixKeyType: PixKeyType
+}
+
 type Transaction = {
   id: string
   type: 'PIX_OUT' | 'PIX_IN' | 'TED'
@@ -36,31 +43,90 @@ type Transaction = {
   createdAt: string
   counterparty: string
 }
+
+type TransferStatus = 'COMPLETED' | 'SCHEDULED' | 'FAILED'
+
 type Transfer = {
   id: string
-  beneficiaryId: string
+  beneficiaryId?: string
+  pixKey?: string
+  pixKeyType?: PixKeyType
   amountCents: number
-  status: 'COMPLETED'
+  status: TransferStatus
+  createdAt: string
+  scheduledFor?: string
+  endToEndId: string
+  correlationId: string
+}
+
+type Notification = {
+  id: string
+  title: string
+  body: string
+  read: boolean
   createdAt: string
 }
+
+type OnboardingStepId = 'PROFILE_OK' | 'FIRST_BENEFICIARY' | 'FIRST_PIX' | 'VIEW_STATEMENT'
+
+type OnboardingStep = {
+  id: OnboardingStepId
+  done: boolean
+}
+
+type OnboardingState = {
+  steps: OnboardingStep[]
+  completed: boolean
+}
+
 type Db = {
   users: MindUserStore
   availableCents: number
+  blockedCents: number
+  dailyLimitCents: number
+  dailySpentCents: number
   beneficiaries: Beneficiary[]
   transactions: Transaction[]
   transfers: Transfer[]
+  notifications: Notification[]
+  onboarding: OnboardingState
   idempotency: Map<string, Transfer>
 }
 
 const MOCK_TOKEN = 'mock-jwt-demo'
 
+const ONBOARDING_STEP_IDS: OnboardingStepId[] = [
+  'PROFILE_OK',
+  'FIRST_BENEFICIARY',
+  'FIRST_PIX',
+  'VIEW_STATEMENT',
+]
+
+function createOnboardingState(): OnboardingState {
+  return {
+    steps: ONBOARDING_STEP_IDS.map((id) => ({ id, done: false })),
+    completed: false,
+  }
+}
+
+function markOnboardingStep(onboarding: OnboardingState, stepId: OnboardingStepId): void {
+  const step = onboarding.steps.find((item) => item.id === stepId)
+  if (step) {
+    step.done = true
+  }
+  onboarding.completed = onboarding.steps.every((item) => item.done)
+}
+
 function createDb(): Db {
   return {
     users: createMindUserStore(),
     availableCents: 250_000,
+    blockedCents: 10_000,
+    dailyLimitCents: 100_000,
+    dailySpentCents: 0,
     beneficiaries: [
-      { id: 'b1', name: 'Ana Silva', pixKey: 'ana@email.com' },
-      { id: 'b2', name: 'Mercado Central', pixKey: '11222333000181' },
+      { id: 'b1', name: 'Ana Silva', pixKey: 'ana@email.com', pixKeyType: 'EMAIL' },
+      { id: 'b2', name: 'Mercado Central', pixKey: '11222333000181', pixKeyType: 'CPF' },
     ],
     transactions: [
       {
@@ -71,8 +137,42 @@ function createDb(): Db {
         createdAt: '2026-07-20T10:00:00.000Z',
         counterparty: 'Carlos',
       },
+      {
+        id: 't2',
+        type: 'PIX_OUT',
+        amountCents: 15_000,
+        description: 'Pagamento mercado',
+        createdAt: '2026-07-21T11:00:00.000Z',
+        counterparty: 'Mercado Central',
+      },
+      {
+        id: 't3',
+        type: 'TED',
+        amountCents: 80_000,
+        description: 'Transferência TED',
+        createdAt: '2026-07-22T09:30:00.000Z',
+        counterparty: 'Banco Exemplo',
+      },
+      {
+        id: 't4',
+        type: 'PIX_IN',
+        amountCents: 25_000,
+        description: 'Estorno parcial',
+        createdAt: '2026-07-23T14:15:00.000Z',
+        counterparty: 'Ana Silva',
+      },
+      {
+        id: 't5',
+        type: 'PIX_OUT',
+        amountCents: 5_000,
+        description: 'Café da manhã',
+        createdAt: '2026-07-24T08:00:00.000Z',
+        counterparty: 'Padaria Sol',
+      },
     ],
     transfers: [],
+    notifications: [],
+    onboarding: createOnboardingState(),
     idempotency: new Map(),
   }
 }
@@ -141,6 +241,52 @@ function endpoint(basePath: string, path: string): string {
   return `*${basePath}${path}`
 }
 
+function resolveTransferCounterparty(db: Db, transfer: Transfer): string {
+  if (transfer.beneficiaryId) {
+    const beneficiary = db.beneficiaries.find((item) => item.id === transfer.beneficiaryId)
+    if (beneficiary) return beneficiary.name
+  }
+  return transfer.pixKey ?? 'Destinatário'
+}
+
+function processDueScheduledTransfers(db: Db, now = new Date()): void {
+  const nowIso = now.toISOString()
+  for (const transfer of db.transfers) {
+    if (transfer.status !== 'SCHEDULED' || !transfer.scheduledFor) continue
+    if (transfer.scheduledFor > nowIso) continue
+    if (db.availableCents < transfer.amountCents) {
+      transfer.status = 'FAILED'
+      db.notifications.unshift({
+        id: crypto.randomUUID(),
+        title: 'Transferência agendada falhou',
+        body: 'Saldo insuficiente para concluir a transferência agendada.',
+        read: false,
+        createdAt: nowIso,
+      })
+      continue
+    }
+    db.availableCents -= transfer.amountCents
+    db.dailySpentCents += transfer.amountCents
+    transfer.status = 'COMPLETED'
+    const counterparty = resolveTransferCounterparty(db, transfer)
+    db.transactions.unshift({
+      id: crypto.randomUUID(),
+      type: 'PIX_OUT',
+      amountCents: transfer.amountCents,
+      description: `PIX para ${counterparty}`,
+      createdAt: nowIso,
+      counterparty,
+    })
+    db.notifications.unshift({
+      id: crypto.randomUUID(),
+      title: 'PIX agendado concluído',
+      body: `Transferência de ${transfer.amountCents} centavos para ${counterparty} foi concluída.`,
+      read: false,
+      createdAt: nowIso,
+    })
+  }
+}
+
 export function createMindHandlers(options: MindHandlerOptions = {}): RequestHandler[] {
   const apiBasePath = options.apiBasePath ?? '/api/v1'
   const db = createDb()
@@ -185,37 +331,77 @@ export function createMindHandlers(options: MindHandlerOptions = {}): RequestHan
         return HttpResponse.json(error('INVALID_PROVISION_REQUEST', message), { status: 400 })
       }
     }),
-    http.get(endpoint(apiBasePath, '/wallet/balance'), () =>
-      HttpResponse.json({ availableCents: db.availableCents, currency: 'BRL' }),
-    ),
+    http.get(endpoint(apiBasePath, '/wallet/balance'), () => {
+      processDueScheduledTransfers(db)
+      return HttpResponse.json({
+        availableCents: db.availableCents,
+        blockedCents: db.blockedCents,
+        dailyLimitCents: db.dailyLimitCents,
+        dailySpentCents: db.dailySpentCents,
+        currency: 'BRL',
+      })
+    }),
     http.get(endpoint(apiBasePath, '/wallet/transactions'), ({ request }) => {
       const url = new URL(request.url)
       const from = url.searchParams.get('from')
       const to = url.searchParams.get('to')
       const type = url.searchParams.get('type')
-      const items = db.transactions.filter((transaction) => {
+      const q = url.searchParams.get('q')?.trim().toLowerCase() ?? ''
+      const page = Math.max(1, Number.parseInt(url.searchParams.get('page') ?? '1', 10) || 1)
+      const pageSize = Math.max(
+        1,
+        Math.min(100, Number.parseInt(url.searchParams.get('pageSize') ?? '20', 10) || 20),
+      )
+      const filtered = db.transactions.filter((transaction) => {
         if (from && transaction.createdAt < from) return false
         if (to && transaction.createdAt > to) return false
-        return !type || type === 'ALL' || transaction.type === type
+        if (type && type !== 'ALL' && transaction.type !== type) return false
+        if (
+          q &&
+          !transaction.description.toLowerCase().includes(q) &&
+          !transaction.counterparty.toLowerCase().includes(q)
+        ) {
+          return false
+        }
+        return true
       })
-      return HttpResponse.json({ items })
+      const total = filtered.length
+      const start = (page - 1) * pageSize
+      const items = filtered.slice(start, start + pageSize)
+      markOnboardingStep(db.onboarding, 'VIEW_STATEMENT')
+      return HttpResponse.json({ items, page, pageSize, total })
     }),
+    http.get(endpoint(apiBasePath, '/me/onboarding'), () =>
+      HttpResponse.json({
+        steps: db.onboarding.steps,
+        completed: db.onboarding.completed,
+      }),
+    ),
     http.get(endpoint(apiBasePath, '/beneficiaries'), () =>
       HttpResponse.json({ items: db.beneficiaries }),
     ),
     http.post(endpoint(apiBasePath, '/beneficiaries'), async ({ request }) => {
-      const body = (await request.json()) as { name: string; pixKey: string }
-      if (!body.name?.trim() || !body.pixKey?.trim()) {
+      const body = (await request.json()) as {
+        name: string
+        pixKey: string
+        pixKeyType?: PixKeyType
+      }
+      if (!body.name?.trim() || !body.pixKey?.trim() || !body.pixKeyType) {
         return HttpResponse.json(
           error(
             'INVALID_BENEFICIARY',
-            'Nome e chave PIX são obrigatórios.',
+            'Nome, chave PIX e tipo da chave são obrigatórios.',
             request.headers.get('X-Correlation-Id') ?? correlationId(),
           ),
           { status: 400 },
         )
       }
-      const beneficiary = { id: crypto.randomUUID(), name: body.name, pixKey: body.pixKey }
+      const beneficiary: Beneficiary = {
+        id: crypto.randomUUID(),
+        name: body.name,
+        pixKey: body.pixKey,
+        pixKeyType: body.pixKeyType,
+      }
       db.beneficiaries.push(beneficiary)
       return HttpResponse.json(beneficiary, { status: 201 })
     }),
@@ -260,12 +446,15 @@ export function createMindHandlers(options: MindHandlerOptions = {}): RequestHan
         )
       }
       db.availableCents -= body.amountCents
+      db.dailySpentCents += body.amountCents
       const transfer: Transfer = {
         id: crypto.randomUUID(),
         beneficiaryId: body.beneficiaryId,
         amountCents: body.amountCents,
         status: 'COMPLETED',
         createdAt: new Date().toISOString(),
+        endToEndId: `E${crypto.randomUUID().replace(/-/g, '').slice(0, 32)}`,
+        correlationId: requestCorrelationId,
       }
       db.transfers.push(transfer)
       db.transactions.unshift({
