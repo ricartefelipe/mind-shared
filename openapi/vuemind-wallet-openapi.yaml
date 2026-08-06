@@ -2,13 +2,11 @@ openapi: 3.0.3
 info:
   title: VueMind Wallet API
   description: >
-    Contrato canônico da carteira digital de estudo VueMind. Este documento é a
-    fonte da verdade compartilhada entre o mock MSW (Vue v1) e as futuras
-    reimplementações de frontend (Angular, React, mobile) e do backend real em
-    Spring. Enquanto o Spring não existe, o MSW simula exatamente estas
-    respostas para que a troca de "mock" para "real" não exija mudar nenhuma
-    linha de `features/*` — apenas desligar o worker e apontar a baseURL.
-  version: '1.0.0'
+    Contrato canônico da carteira digital Mind Wallet 2.0. Este documento é a
+    fonte da verdade compartilhada entre o mock MSW e as reimplementações de
+    frontend (Vue, Angular, React) e do backend SpringMind. Em dev o MSW
+    simula estas respostas; em produção os SPAs apontam para o Spring.
+  version: '2.0.0'
 servers:
   - url: /api/v1
     description: Base path relativo — em dev/test é interceptado pelo MSW.
@@ -18,6 +16,8 @@ tags:
   - name: wallet
   - name: beneficiaries
   - name: transfers
+  - name: notifications
+  - name: me
 
 paths:
   /auth/login:
@@ -47,12 +47,17 @@ paths:
   /wallet/balance:
     get:
       tags: [wallet]
-      summary: Saldo disponível da conta autenticada.
+      summary: Saldo e limites da conta autenticada.
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCorrelationId'
       responses:
         '200':
           description: Saldo atual.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/XCorrelationId'
           content:
             application/json:
               schema:
@@ -61,10 +66,11 @@ paths:
   /wallet/transactions:
     get:
       tags: [wallet]
-      summary: Extrato com filtros opcionais de período e tipo.
+      summary: Extrato paginado com filtros opcionais.
       security:
         - bearerAuth: []
       parameters:
+        - $ref: '#/components/parameters/XCorrelationId'
         - name: from
           in: query
           required: false
@@ -82,19 +88,37 @@ paths:
           required: false
           schema:
             $ref: '#/components/schemas/TransactionType'
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Busca textual em description e counterparty.
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
       responses:
         '200':
-          description: Lista de transações filtradas.
+          description: Página de transações.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/XCorrelationId'
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Transaction'
-                required: [items]
+                $ref: '#/components/schemas/TransactionsPage'
 
   /beneficiaries:
     get:
@@ -102,9 +126,14 @@ paths:
       summary: Lista favorecidos cadastrados.
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCorrelationId'
       responses:
         '200':
           description: Lista de favorecidos.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/XCorrelationId'
           content:
             application/json:
               schema:
@@ -120,6 +149,8 @@ paths:
       summary: Cadastra um novo favorecido.
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCorrelationId'
       requestBody:
         required: true
         content:
@@ -129,6 +160,9 @@ paths:
       responses:
         '201':
           description: Favorecido criado.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/XCorrelationId'
           content:
             application/json:
               schema:
@@ -147,6 +181,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
+        - $ref: '#/components/parameters/XCorrelationId'
         - name: id
           in: path
           required: true
@@ -155,6 +190,9 @@ paths:
       responses:
         '204':
           description: Removido com sucesso.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/XCorrelationId'
         '404':
           description: Favorecido não encontrado.
           content:
@@ -165,10 +203,11 @@ paths:
   /transfers/pix:
     post:
       tags: [transfers]
-      summary: Executa uma transferência PIX para um favorecido existente.
+      summary: Executa ou agenda uma transferência PIX.
       security:
         - bearerAuth: []
       parameters:
+        - $ref: '#/components/parameters/XCorrelationId'
         - name: Idempotency-Key
           in: header
           required: false
@@ -185,19 +224,61 @@ paths:
               $ref: '#/components/schemas/CreatePixRequest'
       responses:
         '201':
-          description: PIX efetuado — comprovante da transferência.
+          description: PIX efetuado ou agendado — comprovante da transferência.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/XCorrelationId'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Transfer'
         '400':
-          description: Requisição inválida (valor <= 0, favorecido inexistente).
+          description: >
+            Requisição inválida (VALIDATION_ERROR, INVALID_PIX_KEY,
+            BENEFICIARY_NOT_FOUND).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '409':
-          description: Saldo insuficiente para completar a transferência.
+          description: >
+            Conflito de negócio (INSUFFICIENT_FUNDS, DAILY_LIMIT_EXCEEDED).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /transfers/pix/qr-payload:
+    get:
+      tags: [transfers]
+      summary: Gera payload demo estável para QR Code PIX.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCorrelationId'
+        - name: amountCents
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: pixKey
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payload do QR.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/XCorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QrPayloadResponse'
+        '400':
+          description: Parâmetros inválidos.
           content:
             application/json:
               schema:
@@ -206,10 +287,11 @@ paths:
   /transfers/{id}:
     get:
       tags: [transfers]
-      summary: Consulta o comprovante de uma transferência já efetuada.
+      summary: Consulta o comprovante de uma transferência.
       security:
         - bearerAuth: []
       parameters:
+        - $ref: '#/components/parameters/XCorrelationId'
         - name: id
           in: path
           required: true
@@ -218,6 +300,9 @@ paths:
       responses:
         '200':
           description: Comprovante encontrado.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/XCorrelationId'
           content:
             application/json:
               schema:
@@ -229,12 +314,110 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /notifications:
+    get:
+      tags: [notifications]
+      summary: Lista notificações da conta autenticada.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCorrelationId'
+      responses:
+        '200':
+          description: Lista de notificações.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/XCorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationsPage'
+
+  /notifications/{id}/read:
+    post:
+      tags: [notifications]
+      summary: Marca uma notificação como lida.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCorrelationId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Marcada como lida.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/XCorrelationId'
+        '404':
+          description: Notificação não encontrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /notifications/read-all:
+    post:
+      tags: [notifications]
+      summary: Marca todas as notificações como lidas.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCorrelationId'
+      responses:
+        '204':
+          description: Todas marcadas como lidas.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/XCorrelationId'
+
+  /me/onboarding:
+    get:
+      tags: [me]
+      summary: Estado do checklist de onboarding da conta.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XCorrelationId'
+      responses:
+        '200':
+          description: Progresso de onboarding.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/XCorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnboardingState'
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       description: Token opaco mock (`mock-jwt-demo`); no Spring real será um JWT.
+
+  parameters:
+    XCorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: >
+        Correlation id do cliente; se omitido o servidor gera um novo e
+        devolve no response header.
+
+  headers:
+    XCorrelationId:
+      description: Correlation id da requisição (eco ou gerado).
+      schema:
+        type: string
+        format: uuid
 
   schemas:
     LoginRequest:
@@ -276,11 +459,25 @@ components:
       properties:
         availableCents:
           type: integer
-          description: Saldo em centavos (evita ponto flutuante).
+          description: Saldo disponível em centavos.
+        blockedCents:
+          type: integer
+          description: Saldo bloqueado em centavos.
+        dailyLimitCents:
+          type: integer
+          description: Limite diário de saída em centavos.
+        dailySpentCents:
+          type: integer
+          description: Total já gasto no dia em centavos.
         currency:
           type: string
           example: BRL
-      required: [availableCents, currency]
+      required:
+        - availableCents
+        - blockedCents
+        - dailyLimitCents
+        - dailySpentCents
+        - currency
 
     TransactionType:
       type: string
@@ -304,6 +501,28 @@ components:
           type: string
       required: [id, type, amountCents, description, createdAt, counterparty]
 
+    TransactionsPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+      required: [items, page, pageSize, total]
+
+    PixKeyType:
+      type: string
+      enum: [EMAIL, CPF, PHONE, RANDOM]
+
     Beneficiary:
       type: object
       properties:
@@ -313,7 +532,9 @@ components:
           type: string
         pixKey:
           type: string
-      required: [id, name, pixKey]
+        pixKeyType:
+          $ref: '#/components/schemas/PixKeyType'
+      required: [id, name, pixKey, pixKeyType]
 
     CreateBeneficiaryRequest:
       type: object
@@ -322,17 +543,34 @@ components:
           type: string
         pixKey:
           type: string
-      required: [name, pixKey]
+        pixKeyType:
+          $ref: '#/components/schemas/PixKeyType'
+      required: [name, pixKey, pixKeyType]
 
     CreatePixRequest:
       type: object
+      description: >
+        amountCents é obrigatório. Destino é XOR: informe beneficiaryId OU o
+        par pixKey + pixKeyType (nunca ambos, nunca nenhum). scheduledFor
+        opcional agenda a transferência para o futuro (status SCHEDULED).
       properties:
-        beneficiaryId:
-          type: string
         amountCents:
           type: integer
           description: Valor em centavos, deve ser positivo.
-      required: [beneficiaryId, amountCents]
+        beneficiaryId:
+          type: string
+        pixKey:
+          type: string
+        pixKeyType:
+          $ref: '#/components/schemas/PixKeyType'
+        scheduledFor:
+          type: string
+          format: date-time
+      required: [amountCents]
+
+    TransferStatus:
+      type: string
+      enum: [COMPLETED, SCHEDULED, FAILED]
 
     Transfer:
       type: object
@@ -341,26 +579,101 @@ components:
           type: string
         beneficiaryId:
           type: string
+        pixKey:
+          type: string
+        pixKeyType:
+          $ref: '#/components/schemas/PixKeyType'
         amountCents:
           type: integer
         status:
-          type: string
-          enum: [COMPLETED]
+          $ref: '#/components/schemas/TransferStatus'
         createdAt:
           type: string
           format: date-time
-      required: [id, beneficiaryId, amountCents, status, createdAt]
+        scheduledFor:
+          type: string
+          format: date-time
+        endToEndId:
+          type: string
+        correlationId:
+          type: string
+          format: uuid
+      required:
+        - id
+        - amountCents
+        - status
+        - createdAt
+        - endToEndId
+        - correlationId
+
+    QrPayloadResponse:
+      type: object
+      properties:
+        payload:
+          type: string
+      required: [payload]
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+        read:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, title, body, read, createdAt]
+
+    NotificationsPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+      required: [items]
+
+    OnboardingStepId:
+      type: string
+      enum: [PROFILE_OK, FIRST_BENEFICIARY, FIRST_PIX, VIEW_STATEMENT]
+
+    OnboardingStep:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/OnboardingStepId'
+        done:
+          type: boolean
+      required: [id, done]
+
+    OnboardingState:
+      type: object
+      properties:
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/OnboardingStep'
+        completed:
+          type: boolean
+      required: [steps, completed]
 
     ApiError:
       type: object
       description: >
         Formato único de erro do contrato — `code` é a chave de negócio
-        (ex.: INSUFFICIENT_FUNDS), `message` é o texto amigável, e
-        `correlationId` amarra o erro ao log do servidor (MSW ou Spring).
+        (ex.: INSUFFICIENT_FUNDS, DAILY_LIMIT_EXCEEDED, INVALID_PIX_KEY,
+        BENEFICIARY_NOT_FOUND, VALIDATION_ERROR), `message` é o texto
+        amigável, e `correlationId` amarra o erro ao log do servidor
+        (MSW ou Spring).
       properties:
         code:
           type: string
-          example: INSUFFICIENT_FUNDS
+          example: DAILY_LIMIT_EXCEEDED
         message:
           type: string
         correlationId:
