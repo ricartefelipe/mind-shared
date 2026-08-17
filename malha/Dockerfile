@@ -8,17 +8,18 @@ RUN groupadd --system app \
   && chown app:app /data
 
 COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --only-binary :all: -r /app/requirements.txt
+
 COPY pyproject.toml /app/pyproject.toml
 COPY mind_shared /app/mind_shared
 COPY corpus /app/corpus
 COPY eval /app/eval
 
-RUN pip install --no-cache-dir --only-binary=:all: -r /app/requirements.txt \
-  && pip install --no-cache-dir --no-deps -e /app \
-  && chown -R app:app /app
+RUN chown -R app:app /app
 
 USER app
 
 ENV MIND_SHARED_DB=/data/mesh.sqlite
+ENV PYTHONPATH=/app
 EXPOSE 8000
-CMD ["mind-shared", "serve", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "mind_shared.cli", "serve", "--host", "0.0.0.0", "--port", "8000"]
