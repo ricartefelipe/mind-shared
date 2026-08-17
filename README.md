@@ -2,9 +2,7 @@
 
 **Conhecimento que se acumula, se prova e se compartilha.**
 
-Mind Shared é uma malha cognitiva compartilhada para organizações. Não é um chatbot. É um substrato de conhecimento vivo: documentos entram, viram trechos com metadados de fonte, alimentam um índice híbrido (BM25 + embeddings) e um grafo de entidades, e só então a síntese fala — sempre com evidência, trecho, fonte e score. Sem evidência, a malha recusa.
-
-O diferencial não é “conversar com documentos”. É um sistema nervoso de evidências: recuperação híbrida, travessia multi-hop, proveniência obrigatória, tenancy por espaços e um loop de correção humana no ranking.
+Mind Shared é um arquivo vivo de evidências. Documentos entram, viram trechos com fonte, alimentam um índice híbrido (BM25 + embeddings) e um grafo de entidades. A consulta percorre um ciclo de quatro estágios — plano, recuperação, verificação, síntese — e só fala com trecho, fonte e score. Sem evidência, recusa. Com conflito, relata os dois lados e não escolhe um.
 
 ## Como rodar
 
@@ -23,10 +21,18 @@ Em outro terminal:
 make serve-web
 ```
 
-- API: http://127.0.0.1:8000 (docs em `/docs`)
+- API: http://127.0.0.1:8000 (contrato em `/docs` e `/openapi.json`)
 - Atlas: http://127.0.0.1:5173
 
-O corpus de exemplo **Arquivo Atlas Norte** (políticas, decisão PIX, postmortem de autenticação, tenancy e norma de evidências) é ingerido no espaço `atlas-norte` na primeira subida da API ou via `make seed`.
+O seed cria o espaço `atlas-norte` (Arquivo Atlas Norte) e imprime o **token de demo**. Rotas de consulta, ingestão, grafo e eval exigem o header `X-Mind-Token`.
+
+Token de fixture (não é segredo de produção):
+
+```
+X-Mind-Token: mind-demo-atlas-norte
+```
+
+O atlas local envia esse token por padrão (`VITE_MIND_TOKEN`). O corpus inclui políticas, decisão PIX, postmortem, tenancy, norma de evidências e um conflito deliberado (circular legado vs. decisão nova).
 
 Docker:
 
@@ -40,42 +46,39 @@ docker compose up --build
 make test
 ```
 
-Isso executa:
+Isso executa o contrato da carteira, o `pytest` da malha e o typecheck do atlas.
 
-- testes do contrato da carteira (`npm test` na raiz)
-- `pytest` da malha (chunking, índice, grafo, recuperação, síntese, memória, eval, API)
-- `tsc` do atlas (`web`)
-
-Eval isolado, depois do seed:
+Eval offline, depois do seed:
 
 ```bash
 cd malha && .venv/bin/python -m mind_shared.cli eval
 ```
 
-Métricas: **recall@k** (documentos ouro no topo) e **faithfulness** (citações ⊆ evidências recuperadas; perguntas sem resposta devem ser recusadas).
+Métricas: **recall@k**, **faithfulness** (citações ⊆ evidências; pergunta sem resposta deve ser recusada) e **citation_precision**. O comando falha se faithfulness cair abaixo do piso (0,75).
 
-## Arquitetura
+## Ciclo cognitivo
 
 ```
-ingest  → parsers (PDF, Markdown, texto) + chunking com overlap
-index   → BM25 esparso + embeddings densos (hashing trick local; sentence-transformers opcional)
-graph   → entidades, relações, citações por trecho
-retrieve→ fusão RRF, multi-hop no grafo, Evidence[]
-synthesize → resposta só com evidências; recusa abaixo do limiar
-memory  → workspaces (tenancy) + feedback útil/errada no ranking
-eval    → gold set em malha/eval/gold.json
+plan      → subobjetivos de recuperação (regras, sem rede)
+retrieve  → BM25 + denso + grafo multi-hop, fusão RRF por subobjetivo
+verify    → cobertura, contradições, selo grounded | conflict | insufficient
+compose   → síntese só com spans ligados a IDs; recusa ou relato dos dois lados
 ```
 
-Persistência: SQLite local (`MIND_SHARED_DB`, padrão `data/mesh.sqlite`). Sem GPU e sem chaves para o caminho padrão. CI passa com o backend `hash`.
+Compositor padrão: extrativo/template, sem chave e sem GPU. Compositor HTTP opcional: `MIND_COMPOSER_URL` e `MIND_COMPOSER_MODEL` (API compatível com `/v1/chat/completions`). Se o endpoint cair, a malha volta ao extrativo; o boot não falha.
 
-API principal:
+Embeddings padrão: hashing trick determinístico. Neural opcional: extra `embeddings` e `MIND_EMBEDDING_MODEL` (ou o pacote instalado). A imagem Docker não leva o extra pesado.
 
-- `POST /workspaces` · `GET /workspaces`
-- `POST /workspaces/{id}/ingest` (upload)
-- `POST /workspaces/{id}/seed`
-- `POST /workspaces/{id}/query`
+Persistência: SQLite (`MIND_SHARED_DB`, padrão `data/mesh.sqlite`).
+
+API:
+
+- `POST /workspaces` — devolve o token uma vez
+- `GET /workspaces`
+- `POST /workspaces/{id}/ingest` · `POST /workspaces/{id}/seed`
+- `POST /workspaces/{id}/query` · `POST /v1/ask`
 - `POST /workspaces/{id}/feedback`
-- `GET /workspaces/{id}/graph`
+- `GET /workspaces/{id}/graph` (entidades, relações, conflitos)
 - `GET /workspaces/{id}/documents`
 - `POST /workspaces/{id}/eval`
 

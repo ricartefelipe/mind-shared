@@ -2,6 +2,10 @@ export type ViewId = 'consulta' | 'arquivo' | 'grafo'
 
 export type FeedbackLabel = 'useful' | 'wrong'
 
+export type PlanKind = 'lookup' | 'hop' | 'compare'
+
+export type GroundingStatus = 'grounded' | 'conflict' | 'insufficient'
+
 export type Workspace = {
   id: string
   slug: string
@@ -32,6 +36,28 @@ export type Evidence = {
   ordinal: number
 }
 
+export type PlanStep = {
+  id: string
+  objective: string
+  kind: PlanKind
+}
+
+export type Contradiction = {
+  left_chunk_id: string
+  right_chunk_id: string
+  subject: string
+  left_claim: string
+  right_claim: string
+  reason: string
+}
+
+export type Verification = {
+  status: GroundingStatus
+  coverage: number
+  contradictions: Contradiction[]
+  notes: string[]
+}
+
 export type QueryResult = {
   query_id: string
   question: string
@@ -40,8 +66,12 @@ export type QueryResult = {
     refused: boolean
     refusal_reason: string | null
     cited_chunk_ids: string[]
+    grounding_status: GroundingStatus
   }
   evidence: Evidence[]
+  plan: PlanStep[]
+  verification: Verification
+  composer: 'extractive' | 'http'
 }
 
 export type GraphSnapshot = {
@@ -53,6 +83,7 @@ export type GraphSnapshot = {
     predicate: string
     evidence_chunk_id: string
   }[]
+  conflicts?: Contradiction[]
 }
 
 export function viewLabel(view: ViewId): string {
@@ -81,7 +112,27 @@ export function hopLabel(hop: number): string {
   return `salto ${hop}`
 }
 
+const ENTITY_TYPES = [
+  'person',
+  'org',
+  'policy',
+  'decision',
+  'incident',
+  'system',
+  'concept',
+  'space',
+] as const
+
+type EntityType = (typeof ENTITY_TYPES)[number]
+
+function isEntityType(type: string): type is EntityType {
+  return (ENTITY_TYPES as readonly string[]).includes(type)
+}
+
 export function entityTypeLabel(type: string): string {
+  if (!isEntityType(type)) {
+    return type
+  }
   switch (type) {
     case 'person':
       return 'pessoa'
@@ -99,7 +150,39 @@ export function entityTypeLabel(type: string): string {
       return 'conceito'
     case 'space':
       return 'espaço'
-    default:
-      return type
+    default: {
+      const unreachable: never = type
+      return unreachable
+    }
+  }
+}
+
+export function groundingLabel(status: GroundingStatus): string {
+  switch (status) {
+    case 'grounded':
+      return 'fundamentado'
+    case 'conflict':
+      return 'conflito'
+    case 'insufficient':
+      return 'insuficiente'
+    default: {
+      const unreachable: never = status
+      return unreachable
+    }
+  }
+}
+
+export function planKindLabel(kind: PlanKind): string {
+  switch (kind) {
+    case 'lookup':
+      return 'recuperação'
+    case 'hop':
+      return 'salto'
+    case 'compare':
+      return 'confronto'
+    default: {
+      const unreachable: never = kind
+      return unreachable
+    }
   }
 }

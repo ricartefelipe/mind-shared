@@ -1,5 +1,5 @@
 from mind_shared.synthesize.grounded import REFUSAL, synthesize
-from mind_shared.types import Evidence, GroundedAnswer
+from mind_shared.types import Evidence, GroundedAnswer, GroundingStatus, Verification
 
 
 def _ev(chunk: str, excerpt: str, score: float) -> Evidence:
@@ -23,6 +23,7 @@ def test_refuses_without_evidence() -> None:
     assert answer.refused
     assert answer.text == REFUSAL
     assert answer.cited_chunk_ids == ()
+    assert answer.grounding_status is GroundingStatus.INSUFFICIENT
 
 
 def test_refuses_low_score_or_no_overlap() -> None:
@@ -44,3 +45,31 @@ def test_cites_only_provided_evidence() -> None:
     assert not answer.refused
     assert set(answer.cited_chunk_ids) <= {"c1", "c2"}
     assert "[1]" in answer.text
+
+
+def test_conflict_reports_both_sides() -> None:
+    left = _ev(
+        "c1",
+        "Analistas com papel ledger.reader podem acessar dados de produção da carteira.",
+        0.05,
+    )
+    right = _ev(
+        "c2",
+        "Analistas com papel ledger.reader não podem acessar dados de produção da carteira.",
+        0.04,
+    )
+    verification = Verification(
+        status=GroundingStatus.CONFLICT,
+        coverage=0.7,
+        contradictions=(),
+        notes=("incompatível",),
+    )
+    answer = synthesize(
+        "Analistas ledger.reader podem acessar dados de produção da carteira?",
+        [left, right],
+        verification,
+    )
+    assert not answer.refused
+    assert answer.grounding_status is GroundingStatus.CONFLICT
+    assert "[A]" in answer.text and "[B]" in answer.text
+    assert set(answer.cited_chunk_ids) == {"c1", "c2"}

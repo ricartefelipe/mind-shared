@@ -11,7 +11,9 @@ import {
 import {
   entityTypeLabel,
   formatScore,
+  groundingLabel,
   hopLabel,
+  planKindLabel,
   viewLabel,
   type DocumentRow,
   type Evidence,
@@ -23,6 +25,7 @@ import {
 
 const PROMPTS = [
   'Quem pode acessar dados de produção da carteira?',
+  'Analistas ledger.reader podem acessar dados de produção da carteira?',
   'TotalRecall autentica o usuário na Carteira Mind?',
   'Quando a norma de evidências recusa uma síntese?',
   'Qual o salário do diretor de marketing da cooperativa em 2019?',
@@ -251,11 +254,50 @@ function Consulta({
         </form>
 
         {result ? (
-          <article className={result.answer.refused ? 'synthesis refused' : 'synthesis'}>
-            <h2>{result.answer.refused ? 'Recusa fundamentada' : 'Síntese com proveniência'}</h2>
-            <p>{result.answer.text}</p>
+          <article
+            className={
+              result.answer.refused
+                ? 'synthesis refused'
+                : result.verification.status === 'conflict'
+                  ? 'synthesis conflict'
+                  : 'synthesis'
+            }
+          >
+            <div className="synthesis-head">
+              <h2>
+                {result.answer.refused
+                  ? 'Recusa fundamentada'
+                  : result.verification.status === 'conflict'
+                    ? 'Conflito no arquivo'
+                    : 'Síntese com proveniência'}
+              </h2>
+              <span className={`seal ${result.verification.status}`}>
+                {groundingLabel(result.verification.status)}
+              </span>
+            </div>
+            {result.plan.length > 0 ? (
+              <ol className="plan">
+                {result.plan.map((step) => (
+                  <li key={step.id}>
+                    <span>{planKindLabel(step.kind)}</span>
+                    {step.objective}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+            <p className="synthesis-body">{result.answer.text}</p>
             {result.answer.refusal_reason ? (
               <p className="reason">{result.answer.refusal_reason}</p>
+            ) : null}
+            {result.verification.contradictions.length > 0 ? (
+              <ul className="conflict-list">
+                {result.verification.contradictions.map((item) => (
+                  <li key={`${item.left_chunk_id}-${item.right_chunk_id}`}>
+                    <strong>{item.subject}</strong>
+                    <span>{item.reason}</span>
+                  </li>
+                ))}
+              </ul>
             ) : null}
           </article>
         ) : (
@@ -282,6 +324,7 @@ function Consulta({
             <span className="title">{item.document_title}</span>
             <span className="score">
               peso {formatScore(item.score)} · {hopLabel(item.hop)}
+              {result.answer.cited_chunk_ids.includes(item.chunk_id) ? ' · citado' : ''}
             </span>
           </button>
         ))}
@@ -405,6 +448,21 @@ function Grafo({ snapshot }: GrafoProps) {
           </li>
         ))}
       </ul>
+      {snapshot.conflicts && snapshot.conflicts.length > 0 ? (
+        <aside className="graph-conflicts">
+          <h2>Conflitos do grafo</h2>
+          <ul>
+            {snapshot.conflicts.map((item) => (
+              <li key={`${item.left_chunk_id}-${item.right_chunk_id}-${item.reason}`}>
+                <strong>{item.subject}</strong>
+                <p>{item.left_claim}</p>
+                <p>{item.right_claim}</p>
+                <span>{item.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </aside>
+      ) : null}
     </section>
   )
 }

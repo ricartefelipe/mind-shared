@@ -8,7 +8,7 @@ from mind_shared.textutil import fold
 from mind_shared.types import EntityType, exhaust_entity_type
 
 CODE_RE = re.compile(
-    r"\b(P-[A-Z]{3,}-[0-9]{2}|DEC-\d{4}-\d{2}|INC-\d{4}-\d{2}|N-[A-Z]{3,}-\d{2})\b"
+    r"\b(P-[A-Z]{3,}-[0-9]{2}|DEC-\d{4}-\d{2}|INC-\d{4}-\d{2}|N-[A-Z]{3,}-\d{2}|C-[A-Z]{3,}-\d{4})\b"
 )
 HEADING_RE = re.compile(r"^#{1,3}\s+(.+)$", re.MULTILINE)
 BOLD_RE = re.compile(r"\*\*([^*]{3,80})\*\*")
@@ -44,6 +44,7 @@ _PREFIX_TYPES: tuple[tuple[str, EntityType], ...] = (
     ("DEC-", EntityType.DECISION),
     ("INC-", EntityType.INCIDENT),
     ("N-", EntityType.POLICY),
+    ("C-", EntityType.POLICY),
 )
 
 GAZETTEER: dict[str, EntityType] = {
@@ -58,6 +59,9 @@ GAZETTEER: dict[str, EntityType] = {
     "norma de evidências": EntityType.POLICY,
     "espaço atlas": EntityType.SPACE,
     "tenancy": EntityType.CONCEPT,
+    "c-acesso-2019": EntityType.POLICY,
+    "c-pix-2023": EntityType.POLICY,
+    "dec-2026-03": EntityType.DECISION,
 }
 
 

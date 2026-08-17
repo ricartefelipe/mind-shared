@@ -87,6 +87,14 @@ CREATE TABLE IF NOT EXISTS feedback (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS workspace_tokens (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  token_hash TEXT NOT NULL,
+  label TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, token_hash)
+);
+
 CREATE INDEX IF NOT EXISTS idx_chunks_ws ON chunks(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_terms_term ON terms(term);
 CREATE INDEX IF NOT EXISTS idx_entities_ws ON entities(workspace_id);

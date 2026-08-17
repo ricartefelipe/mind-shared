@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
+from mind_shared.auth.tokens import TokenBook
 from mind_shared.config import GRAPH_HOPS_DEFAULT
+from mind_shared.graph.conflicts import graph_conflicts
 from mind_shared.graph.extract import GraphIndex
 from mind_shared.index.dense import DenseIndex
 from mind_shared.index.embeddings import EmbeddingBackend, load_backend
@@ -18,17 +20,32 @@ from mind_shared.ingest.parsers import (
 )
 from mind_shared.memory.feedback import FeedbackMemory
 from mind_shared.memory.workspaces import WorkspaceBook
+from mind_shared.plan.decompose import decompose
 from mind_shared.retrieve.pipeline import Retriever
 from mind_shared.store import Store, utcnow
-from mind_shared.synthesize.grounded import synthesize
-from mind_shared.types import FeedbackLabel, ParsedDocument, QueryResult
+from mind_shared.synthesize.composer import Composer, load_composer
+from mind_shared.types import (
+    ComposerName,
+    Contradiction,
+    FeedbackLabel,
+    ParsedDocument,
+    QueryResult,
+)
+from mind_shared.verify.engine import verify
 
 
 class Mesh:
-    def __init__(self, db_path: Path, embedding: EmbeddingBackend | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        embedding: EmbeddingBackend | None = None,
+        composer: Composer | None = None,
+    ) -> None:
         self.store = Store(db_path)
-        self.embedding = embedding or load_backend("hash")
+        self.embedding = embedding or load_backend()
+        self.composer: Composer = composer or load_composer()
         self.workspaces = WorkspaceBook(self.store)
+        self.tokens = TokenBook(self.store)
         self.sparse = SparseIndex(self.store)
         self.dense = DenseIndex(self.store, self.embedding)
         self.graph = GraphIndex(self.store)
@@ -36,6 +53,11 @@ class Mesh:
         self.retriever = Retriever(
             self.store, self.sparse, self.dense, self.graph, self.feedback
         )
+
+    def provision_workspace(self, slug: str, name: str) -> dict[str, str]:
+        workspace = self.workspaces.create(slug, name)
+        token = self.tokens.issue(workspace["id"], slug)
+        return {**workspace, "token": token}
 
     def ingest_path(self, workspace_id: str, path: Path) -> dict[str, str | int]:
         parsed = parse_path(path)
@@ -66,19 +88,31 @@ class Mesh:
         question: str,
         hops: int = GRAPH_HOPS_DEFAULT,
     ) -> QueryResult:
-        evidence = self.retriever.search(workspace_id, question, hops=hops)
-        answer = synthesize(question, evidence)
+        plan = decompose(question)
+        evidence = self.retriever.search_subgoals(
+            workspace_id,
+            tuple(step.objective for step in plan),
+            hops=hops,
+        )
+        graph_hits = graph_conflicts(self.graph, workspace_id)
+        scoped = _scope_conflicts(graph_hits, evidence)
+        verification = verify(question, evidence, scoped)
+        answer = self.composer.compose(question, evidence, verification)
         query_id = uuid4().hex
         self.store.execute(
             "INSERT INTO queries(id, workspace_id, text, created_at) VALUES (?, ?, ?, ?)",
             (query_id, workspace_id, question, utcnow()),
         )
         self.store.commit()
+        composer_name: ComposerName = self.composer.name
         return QueryResult(
             query_id=query_id,
             question=question,
             answer=answer,
             evidence=evidence,
+            plan=plan,
+            verification=verification,
+            composer=composer_name,
         )
 
     def mark_feedback(
@@ -106,7 +140,19 @@ class Mesh:
         return [dict(row) for row in rows]
 
     def graph_snapshot(self, workspace_id: str) -> dict[str, list[dict[str, str]]]:
-        return self.graph.snapshot(workspace_id)
+        snap = self.graph.snapshot(workspace_id)
+        snap["conflicts"] = [
+            {
+                "left_chunk_id": item.left_chunk_id,
+                "right_chunk_id": item.right_chunk_id,
+                "subject": item.subject,
+                "left_claim": item.left_claim,
+                "right_claim": item.right_claim,
+                "reason": item.reason,
+            }
+            for item in graph_conflicts(self.graph, workspace_id)
+        ]
+        return snap
 
     def _ingest_parsed(
         self, workspace_id: str, parsed: ParsedDocument
@@ -164,6 +210,20 @@ class Mesh:
             "chunks": len(drafts),
             "status": "ingested",
         }
+
+
+def _scope_conflicts(
+    hits: tuple[Contradiction, ...], evidence: list
+) -> tuple[Contradiction, ...]:
+    known = {item.chunk_id for item in evidence}
+    if not known:
+        return ()
+    scoped = [
+        item
+        for item in hits
+        if item.left_chunk_id in known or item.right_chunk_id in known
+    ]
+    return tuple(scoped)
 
 
 __all__ = ["Mesh", "UnsupportedFormatError"]

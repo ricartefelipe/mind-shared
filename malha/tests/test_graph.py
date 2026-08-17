@@ -32,3 +32,6 @@ def test_graph_persists_entities(atlas) -> None:
     names = {item["canonical"] for item in snap["entities"]}
     assert any("atlas" in name for name in names)
     assert snap["relations"]
+    assert "conflicts" in snap
+    predicates = {item["predicate"] for item in snap["relations"]}
+    assert "revoga" in predicates

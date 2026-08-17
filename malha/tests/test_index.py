@@ -1,4 +1,4 @@
-from mind_shared.index.embeddings import HashingTrickEmbedding
+from mind_shared.index.embeddings import HashingTrickEmbedding, SentenceTransformer, load_backend
 from mind_shared.index.hybrid import reciprocal_rank_fusion
 from mind_shared.types import RankedHit
 
@@ -17,6 +17,24 @@ def test_related_texts_outrank_unrelated() -> None:
     close = backend.encode("somente operadores acessam dados de produção da carteira")
     far = backend.encode("receita de bolo de chocolate com cobertura")
     assert float(query @ close) > float(query @ far)
+
+
+def test_unknown_backend_raises() -> None:
+    try:
+        load_backend("nope")
+    except ValueError:
+        return
+    raise AssertionError("esperava backend desconhecido")
+
+
+def test_sentence_backend_falls_back_without_package(monkeypatch) -> None:
+    monkeypatch.delenv("MIND_EMBEDDING_MODEL", raising=False)
+    if SentenceTransformer is not None:
+        backend = load_backend("hash")
+        assert isinstance(backend, HashingTrickEmbedding)
+        return
+    backend = load_backend("sentence")
+    assert isinstance(backend, HashingTrickEmbedding)
 
 
 def test_rrf_prefers_consensus() -> None:

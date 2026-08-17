@@ -29,3 +29,19 @@ def test_provenance_fields_present(atlas) -> None:
     assert item.chunk_id
     assert item.start_char >= 0
     assert item.end_char >= item.start_char
+
+
+def test_conflict_query_does_not_pick_a_side(atlas) -> None:
+    mesh, workspace_id = atlas
+    result = mesh.query(
+        workspace_id,
+        "Analistas ledger.reader podem acessar dados de produção da carteira?",
+    )
+    assert result.verification is not None
+    assert result.verification.status.value == "conflict"
+    assert result.answer.grounding_status.value == "conflict"
+    assert not result.answer.refused
+    titles = " ".join(item.document_title for item in result.evidence)
+    assert "C-ACESSO-2019" in titles or "legado" in titles.lower()
+    assert "DEC-2026-03" in titles or "revogação" in titles.lower()
+    assert result.plan

@@ -14,6 +14,7 @@ services:
       - "5173:5173"
     environment:
       VITE_API_URL: http://localhost:8000
+      VITE_MIND_TOKEN: mind-demo-atlas-norte
     depends_on:
       - api
 

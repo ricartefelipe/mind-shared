@@ -4,6 +4,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal, Never
 
+PlanKind = Literal["lookup", "hop", "compare"]
+ComposerName = Literal["extractive", "http"]
+
 
 class EntityType(str, Enum):
     PERSON = "person"
@@ -19,6 +22,12 @@ class EntityType(str, Enum):
 class FeedbackLabel(str, Enum):
     USEFUL = "useful"
     WRONG = "wrong"
+
+
+class GroundingStatus(str, Enum):
+    GROUNDED = "grounded"
+    CONFLICT = "conflict"
+    INSUFFICIENT = "insufficient"
 
 
 @dataclass(frozen=True)
@@ -62,11 +71,37 @@ class Evidence:
 
 
 @dataclass(frozen=True)
+class PlanStep:
+    id: str
+    objective: str
+    kind: PlanKind
+
+
+@dataclass(frozen=True)
+class Contradiction:
+    left_chunk_id: str
+    right_chunk_id: str
+    subject: str
+    left_claim: str
+    right_claim: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class Verification:
+    status: GroundingStatus
+    coverage: float
+    contradictions: tuple[Contradiction, ...] = ()
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class GroundedAnswer:
     text: str
     refused: bool
     refusal_reason: str | None
     cited_chunk_ids: tuple[str, ...]
+    grounding_status: GroundingStatus = GroundingStatus.INSUFFICIENT
 
 
 @dataclass
@@ -75,6 +110,9 @@ class QueryResult:
     question: str
     answer: GroundedAnswer
     evidence: list[Evidence] = field(default_factory=list)
+    plan: tuple[PlanStep, ...] = ()
+    verification: Verification | None = None
+    composer: ComposerName = "extractive"
 
 
 @dataclass(frozen=True)
@@ -92,6 +130,30 @@ class RelationHit:
     dst_name: str
     predicate: str
     evidence_chunk_id: str
+
+
+def exhaust_grounding_status(value: GroundingStatus) -> str:
+    match value:
+        case GroundingStatus.GROUNDED:
+            return "fundamentado"
+        case GroundingStatus.CONFLICT:
+            return "conflito"
+        case GroundingStatus.INSUFFICIENT:
+            return "insuficiente"
+        case _ as unreachable:
+            return _assert_never(unreachable)
+
+
+def exhaust_plan_kind(value: PlanKind) -> str:
+    match value:
+        case "lookup":
+            return "recuperação"
+        case "hop":
+            return "salto"
+        case "compare":
+            return "confronto"
+        case _ as unreachable:
+            return _assert_never(unreachable)
 
 
 def exhaust_entity_type(value: EntityType) -> str:

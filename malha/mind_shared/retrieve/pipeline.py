@@ -32,6 +32,30 @@ class Retriever:
         hops: int = GRAPH_HOPS_DEFAULT,
         k: int = EVIDENCE_K,
     ) -> list[Evidence]:
+        fused = self._retrieve_hits(workspace_id, question, hops)
+        return [self._to_evidence(hit) for hit in fused[:k]]
+
+    def search_subgoals(
+        self,
+        workspace_id: str,
+        objectives: tuple[str, ...] | list[str],
+        hops: int = GRAPH_HOPS_DEFAULT,
+        k: int = EVIDENCE_K,
+    ) -> list[Evidence]:
+        bags = [
+            self._retrieve_hits(workspace_id, objective, hops) for objective in objectives
+        ]
+        if not bags:
+            return []
+        fused = self.feedback.rerank(workspace_id, reciprocal_rank_fusion(*bags))
+        return [self._to_evidence(hit) for hit in fused[:k]]
+
+    def _retrieve_hits(
+        self,
+        workspace_id: str,
+        question: str,
+        hops: int,
+    ) -> list[RankedHit]:
         sparse_hits = self.sparse.search(workspace_id, question, k=RETRIEVE_K)
         dense_hits = self.dense.search(workspace_id, question, k=RETRIEVE_K)
         fused = reciprocal_rank_fusion(sparse_hits, dense_hits)
@@ -54,7 +78,7 @@ class Retriever:
             fused = self.feedback.rerank(
                 workspace_id, reciprocal_rank_fusion(fused, hop_hits)
             )
-        return [self._to_evidence(hit) for hit in fused[:k]]
+        return fused
 
     def _to_evidence(self, hit: RankedHit) -> Evidence:
         row = self.store.fetchone(
