@@ -1,0 +1,21 @@
+services:
+  api:
+    build: ./malha
+    ports:
+      - "8000:8000"
+    environment:
+      MIND_SHARED_DB: /data/mesh.sqlite
+    volumes:
+      - mind-data:/data
+
+  web:
+    build: ./web
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8000
+    depends_on:
+      - api
+
+volumes:
+  mind-data:

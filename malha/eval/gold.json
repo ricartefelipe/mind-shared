@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "acesso-producao",
+      "question": "Quem pode acessar dados de produção da carteira?",
+      "relevant_doc_titles": ["Política de acesso a dados"],
+      "unanswerable": false
+    },
+    {
+      "id": "totalrecall-login",
+      "question": "TotalRecall autentica o usuário na Carteira Mind?",
+      "relevant_doc_titles": ["Postmortem INC-2025-04 — autenticação na Carteira Mind", "Glossário operacional da Cooperativa Atlas Norte"],
+      "unanswerable": false
+    },
+    {
+      "id": "decisao-pix",
+      "question": "O que a decisão DEC-2024-11 mudou no PIX da carteira?",
+      "relevant_doc_titles": ["Decisão de produto DEC-2024-11 — PIX na Carteira Mind"],
+      "unanswerable": false
+    },
+    {
+      "id": "tenancy",
+      "question": "Um trecho ingerido em homolog entra na recuperação de producao?",
+      "relevant_doc_titles": ["Carta de tenancy e espaços"],
+      "unanswerable": false
+    },
+    {
+      "id": "norma-recusa",
+      "question": "Quando a norma de evidências recusa uma síntese?",
+      "relevant_doc_titles": ["Norma de evidências N-EVID-02"],
+      "unanswerable": false
+    },
+    {
+      "id": "papeis-producao",
+      "question": "Quais papéis acessam o espaço producao?",
+      "relevant_doc_titles": ["Carta de tenancy e espaços", "Política de acesso a dados"],
+      "unanswerable": false
+    },
+    {
+      "id": "salario-marketing",
+      "question": "Qual o salário do diretor de marketing da cooperativa em 2019?",
+      "relevant_doc_titles": [],
+      "unanswerable": true
+    },
+    {
+      "id": "preco-bitcoin",
+      "question": "Qual a cotação do bitcoin no último fechamento da B3?",
+      "relevant_doc_titles": [],
+      "unanswerable": true
+    }
+  ]
+}
