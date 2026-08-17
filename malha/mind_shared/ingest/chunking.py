@@ -1,8 +1,53 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from mind_shared.config import CHUNK_OVERLAP_CHARS, CHUNK_TARGET_CHARS
 from mind_shared.textutil import sentences
 from mind_shared.types import ChunkDraft
+
+
+@dataclass
+class _Window:
+    target: int
+    overlap: int
+    packed: list[ChunkDraft] = field(default_factory=list)
+    parts: list[str] = field(default_factory=list)
+    start: int = 0
+    ordinal: int = 0
+
+    def flush(self, end: int) -> None:
+        body = " ".join(self.parts).strip()
+        if not body:
+            self.parts = []
+            return
+        self.packed.append(
+            ChunkDraft(
+                ordinal=self.ordinal,
+                text=body,
+                start_char=self.start,
+                end_char=end,
+            )
+        )
+        self.ordinal += 1
+        self._retain(body, end)
+
+    def _retain(self, body: str, end: int) -> None:
+        if self.overlap <= 0:
+            self.parts = []
+            self.start = end
+            return
+        keep = body[-self.overlap :]
+        self.parts = [keep]
+        self.start = max(self.start, end - len(keep))
+
+    def push(self, unit: str, start: int) -> None:
+        candidate = (" ".join([*self.parts, unit])).strip()
+        if self.parts and len(candidate) > self.target:
+            self.flush(start)
+        if not self.parts:
+            self.start = start
+        self.parts.append(unit)
 
 
 def chunk_text(
@@ -10,49 +55,15 @@ def chunk_text(
     target: int = CHUNK_TARGET_CHARS,
     overlap: int = CHUNK_OVERLAP_CHARS,
 ) -> list[ChunkDraft]:
-    packed: list[ChunkDraft] = []
     units = sentences(text) or ([text.strip()] if text.strip() else [])
-    buf: list[str] = []
-    buf_start = 0
-    cursor = 0
-    ordinal = 0
-
-    def flush(end: int) -> None:
-        nonlocal buf, buf_start, ordinal
-        body = " ".join(buf).strip()
-        if not body:
-            buf = []
-            return
-        packed.append(
-            ChunkDraft(
-                ordinal=ordinal,
-                text=body,
-                start_char=buf_start,
-                end_char=end,
-            )
-        )
-        ordinal += 1
-        if overlap <= 0 or not body:
-            buf = []
-            buf_start = end
-            return
-        keep = body[-overlap:]
-        buf = [keep]
-        buf_start = max(buf_start, end - len(keep))
-
+    window = _Window(target=target, overlap=overlap)
+    offset = 0
     for unit in units:
-        start = text.find(unit, cursor)
+        start = text.find(unit, offset)
         if start < 0:
-            start = cursor
-        end = start + len(unit)
-        cursor = end
-        candidate = (" ".join(buf + [unit])).strip()
-        if buf and len(candidate) > target:
-            flush(start)
-        if not buf:
-            buf_start = start
-        buf.append(unit)
-
-    if buf:
-        flush(len(text))
-    return packed
+            start = offset
+        offset = start + len(unit)
+        window.push(unit, start)
+    if window.parts:
+        window.flush(len(text))
+    return window.packed

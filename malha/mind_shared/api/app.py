@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -105,7 +105,10 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         try:
             return engine.ingest_upload(workspace_id, file.filename or "arquivo.txt", data)
         except UnsupportedFormatError as exc:
-            raise HTTPException(status_code=415, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="formato não suportado",
+            ) from exc
 
     @app.post("/workspaces/{workspace_id}/seed")
     def seed(workspace_id: str) -> dict[str, object]:
@@ -123,8 +126,11 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
             feedback_id = engine.mark_feedback(
                 workspace_id, body.chunk_id, body.label, body.query_id
             )
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="feedback inválido",
+            ) from exc
         return {"feedback_id": feedback_id}
 
     @app.post("/workspaces/{workspace_id}/eval")

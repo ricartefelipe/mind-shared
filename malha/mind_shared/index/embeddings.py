@@ -33,7 +33,7 @@ class HashingTrickEmbedding:
         for i, gram in enumerate(toks[:-1]):
             grams.append(f"{gram}_{toks[i + 1]}")
         for gram in grams:
-            digest = hashlib.md5(gram.encode("utf-8")).digest()
+            digest = hashlib.md5(gram.encode("utf-8"), usedforsecurity=False).digest()
             idx = int.from_bytes(digest[:4], "little") % self.dim
             sign = 1.0 if digest[4] % 2 == 0 else -1.0
             vec[idx] += sign

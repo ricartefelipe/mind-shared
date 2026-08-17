@@ -7,6 +7,14 @@ import type {
 } from './types'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/malha'
+const SAFE_ID = /^[A-Za-z0-9._-]+$/
+
+export function assertSafeId(value: string): string {
+  if (!SAFE_ID.test(value)) {
+    throw new Error('identificador inválido')
+  }
+  return encodeURIComponent(value)
+}
 
 async function parse<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -21,11 +29,13 @@ export async function listWorkspaces(): Promise<Workspace[]> {
 }
 
 export async function listDocuments(workspaceId: string): Promise<DocumentRow[]> {
-  return parse(await fetch(`${BASE}/workspaces/${workspaceId}/documents`))
+  const id = assertSafeId(workspaceId)
+  return parse(await fetch(`${BASE}/workspaces/${id}/documents`))
 }
 
 export async function fetchGraph(workspaceId: string): Promise<GraphSnapshot> {
-  return parse(await fetch(`${BASE}/workspaces/${workspaceId}/graph`))
+  const id = assertSafeId(workspaceId)
+  return parse(await fetch(`${BASE}/workspaces/${id}/graph`))
 }
 
 export async function queryWorkspace(
@@ -33,8 +43,9 @@ export async function queryWorkspace(
   question: string,
   hops: number,
 ): Promise<QueryResult> {
+  const id = assertSafeId(workspaceId)
   return parse(
-    await fetch(`${BASE}/workspaces/${workspaceId}/query`, {
+    await fetch(`${BASE}/workspaces/${id}/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question, hops }),
@@ -48,8 +59,9 @@ export async function sendFeedback(
   label: FeedbackLabel,
   queryId: string | null,
 ): Promise<void> {
+  const id = assertSafeId(workspaceId)
   await parse(
-    await fetch(`${BASE}/workspaces/${workspaceId}/feedback`, {
+    await fetch(`${BASE}/workspaces/${id}/feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chunk_id: chunkId, label, query_id: queryId }),
@@ -58,10 +70,11 @@ export async function sendFeedback(
 }
 
 export async function ingestFile(workspaceId: string, file: File): Promise<unknown> {
+  const id = assertSafeId(workspaceId)
   const body = new FormData()
   body.append('file', file)
   return parse(
-    await fetch(`${BASE}/workspaces/${workspaceId}/ingest`, {
+    await fetch(`${BASE}/workspaces/${id}/ingest`, {
       method: 'POST',
       body,
     }),
@@ -69,8 +82,9 @@ export async function ingestFile(workspaceId: string, file: File): Promise<unkno
 }
 
 export async function seedWorkspace(workspaceId: string): Promise<unknown> {
+  const id = assertSafeId(workspaceId)
   return parse(
-    await fetch(`${BASE}/workspaces/${workspaceId}/seed`, {
+    await fetch(`${BASE}/workspaces/${id}/seed`, {
       method: 'POST',
     }),
   )

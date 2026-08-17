@@ -12,17 +12,38 @@ CODE_RE = re.compile(
 )
 HEADING_RE = re.compile(r"^#{1,3}\s+(.+)$", re.MULTILINE)
 BOLD_RE = re.compile(r"\*\*([^*]{3,80})\*\*")
-TITLE_CASE_RE = re.compile(r"\b([A-ZÁÉÍÓÚÂÊÔ][\wÁÉÍÓÚÂÊÔáéíóúâêôãõç]+(?:\s+[A-ZÁÉÍÓÚÂÊÔ][\wÁÉÍÓÚÂÊÔáéíóúâêôãõç]+){0,4})\b")
+TITLE_CASE_RE = re.compile(
+    r"\b([A-ZÁÉÍÓÚÂÊÔ][A-Za-zÁÉÍÓÚÂÊÔáéíóúâêôãõç]{2,}"
+    r"(?:\s+[A-ZÁÉÍÓÚÂÊÔ][A-Za-zÁÉÍÓÚÂÊÔáéíóúâêôãõç]{2,}){0,3})\b"
+)
 
-RELATION_SPECS: tuple[tuple[str, str], ...] = (
-    (r"(.+?)\s+depende de\s+(.+?)(?:\.|$)", "depende_de"),
-    (r"(.+?)\s+requer\s+(.+?)(?:\.|$)", "requer"),
-    (r"(.+?)\s+substitui\s+(.+?)(?:\.|$)", "substitui"),
-    (r"(.+?)\s+revoga\s+(.+?)(?:\.|$)", "revoga"),
-    (r"(.+?)\s+cita\s+(.+?)(?:\.|$)", "cita"),
-    (r"(.+?)\s+aponta para\s+(.+?)(?:\.|$)", "aponta_para"),
-    (r"(.+?)\s+é responsável por\s+(.+?)(?:\.|$)", "responsavel_por"),
-    (r"(.+?)\s+vive em\s+(.+?)(?:\.|$)", "vive_em"),
+_RELATION_VERBS: tuple[tuple[str, str], ...] = (
+    ("depende de", "depende_de"),
+    ("requer", "requer"),
+    ("substitui", "substitui"),
+    ("revoga", "revoga"),
+    ("cita", "cita"),
+    ("aponta para", "aponta_para"),
+    ("é responsável por", "responsavel_por"),
+    ("vive em", "vive_em"),
+)
+
+_RELATION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (
+        re.compile(
+            rf"([^\n.]{{3,80}})\s+{re.escape(verb)}\s+([^\n.]{{3,80}})(?:\.|$)",
+            re.IGNORECASE,
+        ),
+        predicate,
+    )
+    for verb, predicate in _RELATION_VERBS
+)
+
+_PREFIX_TYPES: tuple[tuple[str, EntityType], ...] = (
+    ("P-", EntityType.POLICY),
+    ("DEC-", EntityType.DECISION),
+    ("INC-", EntityType.INCIDENT),
+    ("N-", EntityType.POLICY),
 )
 
 GAZETTEER: dict[str, EntityType] = {
@@ -45,14 +66,20 @@ def classify_name(name: str) -> EntityType:
     for key, entity_type in GAZETTEER.items():
         if key == folded or key in folded:
             return entity_type
-    if name.startswith("P-") or "politica" in folded or "política" in name.lower():
+    for prefix, entity_type in _PREFIX_TYPES:
+        if name.startswith(prefix):
+            return entity_type
+    return _type_from_cues(name, folded)
+
+
+def _type_from_cues(name: str, folded: str) -> EntityType:
+    lowered = name.lower()
+    if "politica" in folded or "política" in lowered:
         return EntityType.POLICY
-    if name.startswith("DEC-") or "decisão" in name.lower() or "decisao" in folded:
+    if "decisão" in lowered or "decisao" in folded:
         return EntityType.DECISION
-    if name.startswith("INC-") or "incidente" in folded:
+    if "incidente" in folded:
         return EntityType.INCIDENT
-    if name.startswith("N-"):
-        return EntityType.POLICY
     if any(token in folded for token in ("api", "wallet", "msw", "openapi")):
         return EntityType.SYSTEM
     return EntityType.CONCEPT
@@ -60,33 +87,53 @@ def classify_name(name: str) -> EntityType:
 
 def extract_mentions(text: str) -> list[tuple[str, EntityType]]:
     found: dict[str, EntityType] = {}
+    _collect_codes(text, found)
+    _collect_named(text, HEADING_RE, found, min_len=4)
+    _collect_named(text, BOLD_RE, found, min_len=3)
+    _collect_gazetteer(text, found)
+    _collect_title_case(text, found)
+    return list(found.items())
+
+
+def _collect_codes(text: str, found: dict[str, EntityType]) -> None:
     for match in CODE_RE.finditer(text):
-        found[match.group(1)] = classify_name(match.group(1))
-    for match in HEADING_RE.finditer(text):
+        name = match.group(1)
+        found[name] = classify_name(name)
+
+
+def _collect_named(
+    text: str,
+    pattern: re.Pattern[str],
+    found: dict[str, EntityType],
+    min_len: int,
+) -> None:
+    for match in pattern.finditer(text):
         name = match.group(1).strip()
-        if len(name) >= 4:
+        if len(name) >= min_len:
             found[name] = classify_name(name)
-    for match in BOLD_RE.finditer(text):
-        name = match.group(1).strip()
-        if len(name) >= 3:
-            found[name] = classify_name(name)
+
+
+def _collect_gazetteer(text: str, found: dict[str, EntityType]) -> None:
     lowered = fold(text)
     for key, entity_type in GAZETTEER.items():
         if key in lowered:
-            found[key.title() if key.islower() else key] = entity_type
+            label = key.title() if key.islower() else key
+            found[label] = entity_type
+
+
+def _collect_title_case(text: str, found: dict[str, EntityType]) -> None:
+    skip = {"o", "a", "os", "as"}
     for match in TITLE_CASE_RE.finditer(text):
         name = match.group(1).strip()
-        if name.lower() in {"o", "a", "os", "as"} or len(name) < 5:
+        if name.lower() in skip or len(name) < 5 or name in found:
             continue
-        if name not in found:
-            found[name] = classify_name(name)
-    return [(name, entity_type) for name, entity_type in found.items()]
+        found[name] = classify_name(name)
 
 
 def extract_relations(text: str) -> list[tuple[str, str, str]]:
     relations: list[tuple[str, str, str]] = []
-    for pattern, predicate in RELATION_SPECS:
-        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+    for pattern, predicate in _RELATION_PATTERNS:
+        for match in pattern.finditer(text):
             src = match.group(1).strip(" \n-*#")
             dst = match.group(2).strip(" \n-*#")
             if 2 < len(src) < 80 and 2 < len(dst) < 80:

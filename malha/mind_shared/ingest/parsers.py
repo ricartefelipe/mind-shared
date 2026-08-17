@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hashlib import md5, sha256
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 
@@ -61,7 +61,7 @@ def document_checksum(parsed: ParsedDocument) -> str:
 
 def stable_id(*parts: str) -> str:
     joined = "|".join(parts).encode("utf-8")
-    return md5(joined).hexdigest()
+    return sha256(joined).hexdigest()
 
 
 def _title_from(path: Path, text: str) -> str:

@@ -28,6 +28,29 @@ const PROMPTS = [
   'Qual o salário do diretor de marketing da cooperativa em 2019?',
 ]
 
+type ConsultaProps = Readonly<{
+  question: string
+  hops: number
+  busy: boolean
+  result: QueryResult | null
+  selected: Evidence | null
+  onQuestion: (value: string) => void
+  onHops: (value: number) => void
+  onSubmit: (event: FormEvent) => void
+  onSelect: (item: Evidence) => void
+  onMark: (label: 'useful' | 'wrong') => void
+}>
+
+type ArquivoProps = Readonly<{
+  documents: DocumentRow[]
+  onUpload: (file: File | undefined) => void
+  onSeed: () => void
+}>
+
+type GrafoProps = Readonly<{
+  snapshot: GraphSnapshot | null
+}>
+
 export function App() {
   const [view, setView] = useState<ViewId>('consulta')
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
@@ -91,7 +114,11 @@ export function App() {
       return
     }
     await sendFeedback(workspaceId, selected.chunk_id, label, result.query_id)
-    setNotice(label === 'useful' ? 'Evidência marcada útil — o ranking aprende.' : 'Evidência marcada errada — o ranking penaliza.')
+    setNotice(
+      label === 'useful'
+        ? 'Evidência marcada útil — o ranking aprende.'
+        : 'Evidência marcada errada — o ranking penaliza.',
+    )
   }
 
   async function onUpload(file: File | undefined) {
@@ -176,27 +203,27 @@ export function App() {
   )
 }
 
-function Consulta(props: {
-  question: string
-  hops: number
-  busy: boolean
-  result: QueryResult | null
-  selected: Evidence | null
-  onQuestion: (value: string) => void
-  onHops: (value: number) => void
-  onSubmit: (event: FormEvent) => void
-  onSelect: (item: Evidence) => void
-  onMark: (label: 'useful' | 'wrong') => void
-}) {
+function Consulta({
+  question,
+  hops,
+  busy,
+  result,
+  selected,
+  onQuestion,
+  onHops,
+  onSubmit,
+  onSelect,
+  onMark,
+}: ConsultaProps) {
   return (
     <div className="split">
       <section className="column">
-        <form className="query-box" onSubmit={props.onSubmit}>
+        <form className="query-box" onSubmit={onSubmit}>
           <label htmlFor="q">Pergunta ao arquivo</label>
           <textarea
             id="q"
-            value={props.question}
-            onChange={(event) => props.onQuestion(event.target.value)}
+            value={question}
+            onChange={(event) => onQuestion(event.target.value)}
             rows={3}
           />
           <div className="query-tools">
@@ -206,29 +233,29 @@ function Consulta(props: {
                 type="number"
                 min={0}
                 max={3}
-                value={props.hops}
-                onChange={(event) => props.onHops(Number(event.target.value))}
+                value={hops}
+                onChange={(event) => onHops(Number(event.target.value))}
               />
             </label>
-            <button type="submit" disabled={props.busy}>
+            <button type="submit" disabled={busy}>
               Recuperar evidências
             </button>
           </div>
           <div className="prompt-row">
             {PROMPTS.map((item) => (
-              <button key={item} type="button" className="ghost" onClick={() => props.onQuestion(item)}>
+              <button key={item} type="button" className="ghost" onClick={() => onQuestion(item)}>
                 {item}
               </button>
             ))}
           </div>
         </form>
 
-        {props.result ? (
-          <article className={props.result.answer.refused ? 'synthesis refused' : 'synthesis'}>
-            <h2>{props.result.answer.refused ? 'Recusa fundamentada' : 'Síntese com proveniência'}</h2>
-            <p>{props.result.answer.text}</p>
-            {props.result.answer.refusal_reason ? (
-              <p className="reason">{props.result.answer.refusal_reason}</p>
+        {result ? (
+          <article className={result.answer.refused ? 'synthesis refused' : 'synthesis'}>
+            <h2>{result.answer.refused ? 'Recusa fundamentada' : 'Síntese com proveniência'}</h2>
+            <p>{result.answer.text}</p>
+            {result.answer.refusal_reason ? (
+              <p className="reason">{result.answer.refusal_reason}</p>
             ) : null}
           </article>
         ) : (
@@ -244,12 +271,12 @@ function Consulta(props: {
 
       <aside className="evidence-rail">
         <h2>Evidências</h2>
-        {props.result?.evidence.map((item, index) => (
+        {result?.evidence.map((item, index) => (
           <button
             key={item.chunk_id}
             type="button"
-            className={props.selected?.chunk_id === item.chunk_id ? 'evidence active' : 'evidence'}
-            onClick={() => props.onSelect(item)}
+            className={selected?.chunk_id === item.chunk_id ? 'evidence active' : 'evidence'}
+            onClick={() => onSelect(item)}
           >
             <span className="index">{String(index + 1).padStart(2, '0')}</span>
             <span className="title">{item.document_title}</span>
@@ -258,17 +285,17 @@ function Consulta(props: {
             </span>
           </button>
         ))}
-        {props.selected ? (
+        {selected ? (
           <div className="excerpt">
             <p className="source">
-              {props.selected.source_path} · ordinal {props.selected.ordinal}
+              {selected.source_path} · ordinal {selected.ordinal}
             </p>
-            <blockquote>{props.selected.excerpt}</blockquote>
+            <blockquote>{selected.excerpt}</blockquote>
             <div className="marks">
-              <button type="button" onClick={() => props.onMark('useful')}>
+              <button type="button" onClick={() => onMark('useful')}>
                 útil
               </button>
-              <button type="button" className="danger" onClick={() => props.onMark('wrong')}>
+              <button type="button" className="danger" onClick={() => onMark('wrong')}>
                 errada
               </button>
             </div>
@@ -281,11 +308,7 @@ function Consulta(props: {
   )
 }
 
-function Arquivo(props: {
-  documents: DocumentRow[]
-  onUpload: (file: File | undefined) => void
-  onSeed: () => void
-}) {
+function Arquivo({ documents, onUpload, onSeed }: ArquivoProps) {
   return (
     <section className="archive">
       <div className="archive-tools">
@@ -294,10 +317,10 @@ function Arquivo(props: {
           <input
             type="file"
             accept=".pdf,.md,.markdown,.txt"
-            onChange={(event) => props.onUpload(event.target.files?.[0])}
+            onChange={(event) => onUpload(event.target.files?.[0])}
           />
         </label>
-        <button type="button" onClick={props.onSeed}>
+        <button type="button" onClick={onSeed}>
           Carregar corpus Atlas Norte
         </button>
       </div>
@@ -311,7 +334,7 @@ function Arquivo(props: {
           </tr>
         </thead>
         <tbody>
-          {props.documents.map((doc) => (
+          {documents.map((doc) => (
             <tr key={doc.id}>
               <td>{doc.title}</td>
               <td className="mono">{doc.source_path}</td>
@@ -325,9 +348,9 @@ function Arquivo(props: {
   )
 }
 
-function Grafo(props: { snapshot: GraphSnapshot | null }) {
+function Grafo({ snapshot }: GrafoProps) {
   const layout = useMemo(() => {
-    const entities = props.snapshot?.entities.slice(0, 36) ?? []
+    const entities = snapshot?.entities.slice(0, 36) ?? []
     const width = 720
     const height = 520
     const cx = width / 2
@@ -342,7 +365,7 @@ function Grafo(props: { snapshot: GraphSnapshot | null }) {
       }
     })
     const byId = new Map(nodes.map((node) => [node.id, node]))
-    const edges = (props.snapshot?.relations ?? [])
+    const edges = (snapshot?.relations ?? [])
       .map((rel) => {
         const src = byId.get(rel.src)
         const dst = byId.get(rel.dst)
@@ -353,9 +376,9 @@ function Grafo(props: { snapshot: GraphSnapshot | null }) {
       })
       .filter((item): item is NonNullable<typeof item> => item !== null)
     return { nodes, edges, width, height }
-  }, [props.snapshot])
+  }, [snapshot])
 
-  if (!props.snapshot) {
+  if (!snapshot) {
     return <p className="empty">Abra o grafo após ingerir o arquivo.</p>
   }
 
@@ -375,7 +398,7 @@ function Grafo(props: { snapshot: GraphSnapshot | null }) {
         ))}
       </svg>
       <ul className="legend">
-        {props.snapshot.entities.slice(0, 12).map((entity) => (
+        {snapshot.entities.slice(0, 12).map((entity) => (
           <li key={entity.id}>
             <strong>{entity.name}</strong>
             <span>{entityTypeLabel(entity.type)}</span>
