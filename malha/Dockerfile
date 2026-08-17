@@ -7,8 +7,8 @@ RUN groupadd --system app \
   && mkdir -p /data \
   && chown app:app /data
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir --only-binary :all: -r /app/requirements.txt
+COPY requirements.lock /app/requirements.lock
+RUN pip install --no-cache-dir --only-binary :all: --require-hashes -r /app/requirements.lock
 
 COPY pyproject.toml /app/pyproject.toml
 COPY mind_shared /app/mind_shared
