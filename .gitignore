@@ -1,2 +1,17 @@
 node_modules/
 dist/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+data/
+malha/data/
+web/dist/
+.pytest_cache/
+*.egg-info/
+.worktrees/
+.coverage
+*.tsbuildinfo
+.python-version
