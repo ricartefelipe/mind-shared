@@ -1,0 +1,104 @@
+{
+  "cases": [
+    {
+      "id": "acesso-producao",
+      "question": "Quem pode acessar dados de produção da carteira?",
+      "relevant_doc_titles": ["Política de acesso a dados", "Decisão DEC-2026-03 — revogação de leitura em produção"],
+      "unanswerable": false
+    },
+    {
+      "id": "totalrecall-login",
+      "question": "TotalRecall autentica o usuário na Carteira Mind?",
+      "relevant_doc_titles": ["Postmortem INC-2025-04 — autenticação na Carteira Mind", "Glossário operacional da Cooperativa Atlas Norte"],
+      "unanswerable": false
+    },
+    {
+      "id": "decisao-pix",
+      "question": "O que a decisão DEC-2024-11 mudou no PIX da carteira?",
+      "relevant_doc_titles": ["Decisão de produto DEC-2024-11 — PIX na Carteira Mind"],
+      "unanswerable": false
+    },
+    {
+      "id": "tenancy",
+      "question": "Um trecho ingerido em homolog entra na recuperação de producao?",
+      "relevant_doc_titles": ["Carta de tenancy e espaços"],
+      "unanswerable": false
+    },
+    {
+      "id": "norma-recusa",
+      "question": "Quando a norma de evidências recusa uma síntese?",
+      "relevant_doc_titles": ["Norma de evidências N-EVID-02"],
+      "unanswerable": false
+    },
+    {
+      "id": "papeis-producao",
+      "question": "Quais papéis acessam o espaço producao?",
+      "relevant_doc_titles": ["Carta de tenancy e espaços", "Política de acesso a dados"],
+      "unanswerable": false
+    },
+    {
+      "id": "salario-marketing",
+      "question": "Qual o salário do diretor de marketing da cooperativa em 2019?",
+      "relevant_doc_titles": [],
+      "unanswerable": true
+    },
+    {
+      "id": "preco-bitcoin",
+      "question": "Qual a cotação do bitcoin no último fechamento da B3?",
+      "relevant_doc_titles": [],
+      "unanswerable": true
+    },
+    {
+      "id": "conflito-reader",
+      "question": "Analistas ledger.reader podem acessar dados de produção da carteira?",
+      "relevant_doc_titles": [
+        "Circular C-ACESSO-2019 — acesso de leitores a produção",
+        "Decisão DEC-2026-03 — revogação de leitura em produção"
+      ],
+      "unanswerable": false,
+      "expect_status": "conflict"
+    },
+    {
+      "id": "conflito-pix-mocks",
+      "question": "Chaves PIX de produção entram em mocks da carteira?",
+      "relevant_doc_titles": [
+        "Circular C-PIX-2023 — chaves de demonstração",
+        "Decisão de produto DEC-2024-11 — PIX na Carteira Mind"
+      ],
+      "unanswerable": false,
+      "expect_status": "conflict"
+    },
+    {
+      "id": "multihop-norma-incidente",
+      "question": "O que a norma de evidências exige após o incidente de autenticação INC-2025-04?",
+      "relevant_doc_titles": [
+        "Norma de evidências N-EVID-02",
+        "Postmortem INC-2025-04 — autenticação na Carteira Mind"
+      ],
+      "unanswerable": false
+    },
+    {
+      "id": "citacao-papeis-acesso",
+      "question": "Quais papéis P-ACESSO-01 autoriza em dados de produção da carteira?",
+      "relevant_doc_titles": ["Política de acesso a dados"],
+      "unanswerable": false
+    },
+    {
+      "id": "cnpj-1998",
+      "question": "Qual o CNPJ da cooperativa Atlas Norte em 1998?",
+      "relevant_doc_titles": [],
+      "unanswerable": true
+    },
+    {
+      "id": "retencao-conflito",
+      "question": "Por quanto tempo extrações de saldo em produção permanecem no arquivo?",
+      "relevant_doc_titles": [
+        "Circular C-ACESSO-2019 — acesso de leitores a produção",
+        "Decisão DEC-2026-03 — revogação de leitura em produção",
+        "Política de acesso a dados"
+      ],
+      "unanswerable": false,
+      "expect_status": "conflict"
+    }
+  ]
+}
