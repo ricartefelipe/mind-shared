@@ -14,7 +14,6 @@ _CODE_RES: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bN-[A-Z]{3,}-\d{2}\b"),
     re.compile(r"\bC-[A-Z]{3,}-\d{4}\b"),
 )
-HEADING_RE = re.compile(r"^#{1,3}[ \t]+([^\n]+)$", re.MULTILINE)
 BOLD_RE = re.compile(r"\*\*([^*]{3,80})\*\*")
 _TITLE_WORD = re.compile(r"[A-ZÁÉÍÓÚÂÊÔ][A-Za-zÁÉÍÓÚÂÊÔáéíóúâêôãõç]{2,}")
 
@@ -113,7 +112,7 @@ def _type_from_cues(name: str, folded: str) -> EntityType:
 def extract_mentions(text: str) -> list[tuple[str, EntityType]]:
     found: dict[str, EntityType] = {}
     _collect_codes(text, found)
-    _collect_named(text, HEADING_RE, found, min_len=4)
+    _collect_headings(text, found)
     _collect_named(text, BOLD_RE, found, min_len=3)
     _collect_gazetteer(text, found)
     _collect_title_case(text, found)
@@ -123,6 +122,30 @@ def extract_mentions(text: str) -> list[tuple[str, EntityType]]:
 def _collect_codes(text: str, found: dict[str, EntityType]) -> None:
     for name in find_codes(text):
         found[name] = classify_name(name)
+
+
+def _collect_headings(text: str, found: dict[str, EntityType]) -> None:
+    for line in text.splitlines():
+        name = _heading_title(line)
+        if name is not None and len(name) >= 4:
+            found[name] = classify_name(name)
+
+
+def _heading_title(line: str) -> str | None:
+    hashes = 0
+    for char in line:
+        if char != "#":
+            break
+        hashes += 1
+        if hashes > 3:
+            return None
+    if hashes == 0:
+        return None
+    rest = line[hashes:]
+    if not rest or rest[0] not in " \t":
+        return None
+    title = rest.lstrip(" \t").strip()
+    return title or None
 
 
 def _collect_named(

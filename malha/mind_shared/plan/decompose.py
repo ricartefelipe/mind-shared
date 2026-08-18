@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import re
-
 from mind_shared.graph.extract import find_codes
 from mind_shared.textutil import fold
 from mind_shared.types import PlanKind, PlanStep, exhaust_plan_kind
 
-_SPLIT_WORD = re.compile(r"\s+(?:e|ou|versus|vs)\s+", re.IGNORECASE)
-_SPLIT_SEMI = re.compile(r";\s+")
+_SPLIT_WORDS = frozenset({"e", "ou", "versus", "vs"})
 _HOP_CUES = (
     "apos",
     "depois",
@@ -83,8 +80,25 @@ def decompose(question: str) -> tuple[PlanStep, ...]:
 def _split_clauses(text: str) -> list[str]:
     normalized = text.replace("vs.", "vs").replace("VS.", "vs")
     parts: list[str] = []
-    for chunk in _SPLIT_SEMI.split(normalized):
-        parts.extend(_SPLIT_WORD.split(chunk))
+    for chunk in normalized.split("; "):
+        parts.extend(_split_conjunctions(chunk))
+    return parts
+
+
+def _split_conjunctions(text: str) -> list[str]:
+    words = text.split()
+    if not words:
+        return [text] if text else []
+    parts: list[str] = []
+    current: list[str] = []
+    for word in words:
+        if word.lower() in _SPLIT_WORDS and current:
+            parts.append(" ".join(current))
+            current = []
+        else:
+            current.append(word)
+    if current:
+        parts.append(" ".join(current))
     return parts
 
 
