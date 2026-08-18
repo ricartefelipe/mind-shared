@@ -231,7 +231,7 @@ function Consulta({
           />
           <div className="query-tools">
             <label>
-              saltos
+              <span>saltos</span>
               <input
                 type="number"
                 min={0}
@@ -253,62 +253,7 @@ function Consulta({
           </div>
         </form>
 
-        {result ? (
-          <article
-            className={
-              result.answer.refused
-                ? 'synthesis refused'
-                : result.verification.status === 'conflict'
-                  ? 'synthesis conflict'
-                  : 'synthesis'
-            }
-          >
-            <div className="synthesis-head">
-              <h2>
-                {result.answer.refused
-                  ? 'Recusa fundamentada'
-                  : result.verification.status === 'conflict'
-                    ? 'Conflito no arquivo'
-                    : 'Síntese com proveniência'}
-              </h2>
-              <span className={`seal ${result.verification.status}`}>
-                {groundingLabel(result.verification.status)}
-              </span>
-            </div>
-            {result.plan.length > 0 ? (
-              <ol className="plan">
-                {result.plan.map((step) => (
-                  <li key={step.id}>
-                    <span>{planKindLabel(step.kind)}</span>
-                    {step.objective}
-                  </li>
-                ))}
-              </ol>
-            ) : null}
-            <p className="synthesis-body">{result.answer.text}</p>
-            {result.answer.refusal_reason ? (
-              <p className="reason">{result.answer.refusal_reason}</p>
-            ) : null}
-            {result.verification.contradictions.length > 0 ? (
-              <ul className="conflict-list">
-                {result.verification.contradictions.map((item) => (
-                  <li key={`${item.left_chunk_id}-${item.right_chunk_id}`}>
-                    <strong>{item.subject}</strong>
-                    <span>{item.reason}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </article>
-        ) : (
-          <article className="synthesis idle">
-            <h2>O arquivo não conversa. Ele prova.</h2>
-            <p>
-              Cada afirmação aponta para fonte, trecho e score. Sem evidência, a malha
-              cala. O ranking híbrido funde BM25, vizinhança densa e travessia do grafo.
-            </p>
-          </article>
-        )}
+        {result ? <SynthesisCard result={result} /> : <SynthesisIdle />}
       </section>
 
       <aside className="evidence-rail">
@@ -351,12 +296,104 @@ function Consulta({
   )
 }
 
+type SynthesisTone = 'refused' | 'conflict' | 'ok'
+
+function synthesisTone(result: QueryResult): SynthesisTone {
+  if (result.answer.refused) {
+    return 'refused'
+  }
+  if (result.verification.status === 'conflict') {
+    return 'conflict'
+  }
+  return 'ok'
+}
+
+function synthesisTitle(tone: SynthesisTone): string {
+  switch (tone) {
+    case 'refused':
+      return 'Recusa fundamentada'
+    case 'conflict':
+      return 'Conflito no arquivo'
+    case 'ok':
+      return 'Síntese com proveniência'
+    default: {
+      const _exhaustive: never = tone
+      return _exhaustive
+    }
+  }
+}
+
+function synthesisClass(tone: SynthesisTone): string {
+  switch (tone) {
+    case 'refused':
+      return 'synthesis refused'
+    case 'conflict':
+      return 'synthesis conflict'
+    case 'ok':
+      return 'synthesis'
+    default: {
+      const _exhaustive: never = tone
+      return _exhaustive
+    }
+  }
+}
+
+function SynthesisIdle() {
+  return (
+    <article className="synthesis idle">
+      <h2>O arquivo não conversa. Ele prova.</h2>
+      <p>
+        Cada afirmação aponta para fonte, trecho e score. Sem evidência, a malha
+        cala. O ranking híbrido funde BM25, vizinhança densa e travessia do grafo.
+      </p>
+    </article>
+  )
+}
+
+function SynthesisCard({ result }: Readonly<{ result: QueryResult }>) {
+  const tone = synthesisTone(result)
+  return (
+    <article className={synthesisClass(tone)}>
+      <div className="synthesis-head">
+        <h2>{synthesisTitle(tone)}</h2>
+        <span className={`seal ${result.verification.status}`}>
+          {groundingLabel(result.verification.status)}
+        </span>
+      </div>
+      {result.plan.length > 0 ? (
+        <ol className="plan">
+          {result.plan.map((step) => (
+            <li key={step.id}>
+              <span>{planKindLabel(step.kind)}</span>
+              {step.objective}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      <p className="synthesis-body">{result.answer.text}</p>
+      {result.answer.refusal_reason ? (
+        <p className="reason">{result.answer.refusal_reason}</p>
+      ) : null}
+      {result.verification.contradictions.length > 0 ? (
+        <ul className="conflict-list">
+          {result.verification.contradictions.map((item) => (
+            <li key={`${item.left_chunk_id}-${item.right_chunk_id}`}>
+              <strong>{item.subject}</strong>
+              <span>{item.reason}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </article>
+  )
+}
+
 function Arquivo({ documents, onUpload, onSeed }: ArquivoProps) {
   return (
     <section className="archive">
       <div className="archive-tools">
         <label className="file">
-          Ingerir PDF, Markdown ou texto
+          <span>Ingerir PDF, Markdown ou texto</span>
           <input
             type="file"
             accept=".pdf,.md,.markdown,.txt"

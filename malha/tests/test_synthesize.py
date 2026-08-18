@@ -71,5 +71,6 @@ def test_conflict_reports_both_sides() -> None:
     )
     assert not answer.refused
     assert answer.grounding_status is GroundingStatus.CONFLICT
-    assert "[A]" in answer.text and "[B]" in answer.text
+    assert "[A]" in answer.text
+    assert "[B]" in answer.text
     assert set(answer.cited_chunk_ids) == {"c1", "c2"}

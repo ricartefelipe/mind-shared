@@ -55,8 +55,24 @@ def chunk_text(
     target: int = CHUNK_TARGET_CHARS,
     overlap: int = CHUNK_OVERLAP_CHARS,
 ) -> list[ChunkDraft]:
-    units = sentences(text) or ([text.strip()] if text.strip() else [])
     window = _Window(target=target, overlap=overlap)
+    _feed(window, text, _units(text))
+    if window.parts:
+        window.flush(len(text))
+    return window.packed
+
+
+def _units(text: str) -> list[str]:
+    found = sentences(text)
+    if found:
+        return found
+    stripped = text.strip()
+    if stripped:
+        return [stripped]
+    return []
+
+
+def _feed(window: _Window, text: str, units: list[str]) -> None:
     offset = 0
     for unit in units:
         start = text.find(unit, offset)
@@ -64,6 +80,3 @@ def chunk_text(
             start = offset
         offset = start + len(unit)
         window.push(unit, start)
-    if window.parts:
-        window.flush(len(text))
-    return window.packed

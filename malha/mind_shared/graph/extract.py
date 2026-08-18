@@ -7,15 +7,16 @@ from mind_shared.store import Store
 from mind_shared.textutil import fold
 from mind_shared.types import EntityType, exhaust_entity_type
 
-CODE_RE = re.compile(
-    r"\b(P-[A-Z]{3,}-[0-9]{2}|DEC-\d{4}-\d{2}|INC-\d{4}-\d{2}|N-[A-Z]{3,}-\d{2}|C-[A-Z]{3,}-\d{4})\b"
+_CODE_RES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bP-[A-Z]{3,}-\d{2}\b"),
+    re.compile(r"\bDEC-\d{4}-\d{2}\b"),
+    re.compile(r"\bINC-\d{4}-\d{2}\b"),
+    re.compile(r"\bN-[A-Z]{3,}-\d{2}\b"),
+    re.compile(r"\bC-[A-Z]{3,}-\d{4}\b"),
 )
-HEADING_RE = re.compile(r"^#{1,3}\s+(.+)$", re.MULTILINE)
+HEADING_RE = re.compile(r"^#{1,3}[ \t]+([^\n]+)$", re.MULTILINE)
 BOLD_RE = re.compile(r"\*\*([^*]{3,80})\*\*")
-TITLE_CASE_RE = re.compile(
-    r"\b([A-ZÁÉÍÓÚÂÊÔ][A-Za-zÁÉÍÓÚÂÊÔáéíóúâêôãõç]{2,}"
-    r"(?:\s+[A-ZÁÉÍÓÚÂÊÔ][A-Za-zÁÉÍÓÚÂÊÔáéíóúâêôãõç]{2,}){0,3})\b"
-)
+_TITLE_WORD = re.compile(r"[A-ZÁÉÍÓÚÂÊÔ][A-Za-zÁÉÍÓÚÂÊÔáéíóúâêôãõç]{2,}")
 
 _RELATION_VERBS: tuple[tuple[str, str], ...] = (
     ("depende de", "depende_de"),
@@ -65,15 +66,35 @@ GAZETTEER: dict[str, EntityType] = {
 }
 
 
+def find_codes(text: str) -> list[str]:
+    hits = [(match.start(), match.group(0)) for pattern in _CODE_RES for match in pattern.finditer(text)]
+    hits.sort(key=lambda item: item[0])
+    return [code for _, code in hits]
+
+
 def classify_name(name: str) -> EntityType:
     folded = fold(name)
+    mapped = _gazetteer_type(folded)
+    if mapped is not None:
+        return mapped
+    mapped = _prefix_type(name)
+    if mapped is not None:
+        return mapped
+    return _type_from_cues(name, folded)
+
+
+def _gazetteer_type(folded: str) -> EntityType | None:
     for key, entity_type in GAZETTEER.items():
         if key == folded or key in folded:
             return entity_type
+    return None
+
+
+def _prefix_type(name: str) -> EntityType | None:
     for prefix, entity_type in _PREFIX_TYPES:
         if name.startswith(prefix):
             return entity_type
-    return _type_from_cues(name, folded)
+    return None
 
 
 def _type_from_cues(name: str, folded: str) -> EntityType:
@@ -100,8 +121,7 @@ def extract_mentions(text: str) -> list[tuple[str, EntityType]]:
 
 
 def _collect_codes(text: str, found: dict[str, EntityType]) -> None:
-    for match in CODE_RE.finditer(text):
-        name = match.group(1)
+    for name in find_codes(text):
         found[name] = classify_name(name)
 
 
@@ -127,11 +147,30 @@ def _collect_gazetteer(text: str, found: dict[str, EntityType]) -> None:
 
 def _collect_title_case(text: str, found: dict[str, EntityType]) -> None:
     skip = {"o", "a", "os", "as"}
-    for match in TITLE_CASE_RE.finditer(text):
-        name = match.group(1).strip()
-        if name.lower() in skip or len(name) < 5 or name in found:
-            continue
-        found[name] = classify_name(name)
+    matches = list(_TITLE_WORD.finditer(text))
+    index = 0
+    while index < len(matches):
+        run, nxt = _title_run(text, matches, index)
+        name = text[run[0].start() : run[-1].end()]
+        if name.lower() not in skip and len(name) >= 5 and name not in found:
+            found[name] = classify_name(name)
+        index = nxt
+
+
+def _title_run(
+    text: str,
+    matches: list[re.Match[str]],
+    start: int,
+) -> tuple[list[re.Match[str]], int]:
+    run = [matches[start]]
+    walk = start
+    while walk + 1 < len(matches) and len(run) < 4:
+        nxt = matches[walk + 1]
+        if text[run[-1].end() : nxt.start()] != " ":
+            break
+        run.append(nxt)
+        walk += 1
+    return run, walk + 1
 
 
 def extract_relations(text: str) -> list[tuple[str, str, str]]:

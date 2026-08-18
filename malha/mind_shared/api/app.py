@@ -78,7 +78,7 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         _authorize(workspace_id, x_mind_token)
         return engine.documents(workspace_id)
 
-    @app.get("/workspaces/{workspace_id}/graph", response_model=GraphOut)
+    @app.get("/workspaces/{workspace_id}/graph")
     def graph(
         workspace_id: str,
         x_mind_token: Annotated[str | None, Header()] = None,
@@ -91,10 +91,13 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
             conflicts=[GraphConflictOut(**item) for item in snap.get("conflicts", [])],
         )
 
-    @app.post("/workspaces/{workspace_id}/ingest")
+    @app.post(
+        "/workspaces/{workspace_id}/ingest",
+        responses={status.HTTP_415_UNSUPPORTED_MEDIA_TYPE: {"description": "formato não suportado"}},
+    )
     async def ingest(
         workspace_id: str,
-        file: UploadFile = File(...),
+        file: Annotated[UploadFile, File()],
         x_mind_token: Annotated[str | None, Header()] = None,
     ) -> dict[str, str | int]:
         _authorize(workspace_id, x_mind_token)
@@ -116,7 +119,7 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         ingested = engine.ingest_corpus(workspace_id, corpus_dir())
         return {"ingested": ingested}
 
-    @app.post("/workspaces/{workspace_id}/query", response_model=QueryOut)
+    @app.post("/workspaces/{workspace_id}/query")
     def query(
         workspace_id: str,
         body: QueryIn,
@@ -126,7 +129,7 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         result = engine.query(workspace_id, body.question, hops=body.hops)
         return query_out(result)
 
-    @app.post("/v1/ask", response_model=QueryOut)
+    @app.post("/v1/ask")
     def ask(
         body: AskIn,
         x_mind_token: Annotated[str | None, Header()] = None,
@@ -135,7 +138,10 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         result = engine.query(body.workspace_id, body.question, hops=body.hops)
         return query_out(result)
 
-    @app.post("/workspaces/{workspace_id}/feedback")
+    @app.post(
+        "/workspaces/{workspace_id}/feedback",
+        responses={status.HTTP_400_BAD_REQUEST: {"description": "feedback inválido"}},
+    )
     def feedback(
         workspace_id: str,
         body: FeedbackIn,

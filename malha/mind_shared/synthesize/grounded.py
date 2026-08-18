@@ -71,38 +71,16 @@ def _compose_conflict(
     evidence: list[Evidence],
     verification: Verification | None,
 ) -> GroundedAnswer:
-    by_id = {item.chunk_id: item for item in evidence}
-    sides: list[Evidence] = []
-    if verification:
-        for item in verification.contradictions:
-            if item.left_chunk_id in by_id:
-                sides.append(by_id[item.left_chunk_id])
-            if item.right_chunk_id in by_id:
-                sides.append(by_id[item.right_chunk_id])
-            if len(sides) >= 2:
-                break
-    unique: list[Evidence] = []
-    seen: set[str] = set()
-    for item in sides + evidence:
-        if item.chunk_id in seen:
-            continue
-        seen.add(item.chunk_id)
-        unique.append(item)
-        if len(unique) >= 2:
-            break
-    if len(unique) < 2:
-        unique = evidence[:2]
+    pair = _conflict_pair(evidence, verification)
     lines = [
         "O arquivo registra posições incompatíveis. A malha não escolhe um lado; relata as fontes.",
         "",
     ]
     cited: list[str] = []
     labels = ("A", "B")
-    for index, item in enumerate(unique[:2], start=1):
+    for index, item in enumerate(pair, start=1):
         sentence = best_sentence(item.excerpt, question)
-        lines.append(
-            f"[{labels[index - 1]}] {sentence} [{index}] — {item.document_title}"
-        )
+        lines.append(f"[{labels[index - 1]}] {sentence} [{index}] — {item.document_title}")
         cited.append(item.chunk_id)
     return GroundedAnswer(
         text="\n".join(lines),
@@ -111,6 +89,46 @@ def _compose_conflict(
         cited_chunk_ids=tuple(cited),
         grounding_status=GroundingStatus.CONFLICT,
     )
+
+
+def _conflict_pair(evidence: list[Evidence], verification: Verification | None) -> list[Evidence]:
+    sides = _sides_from_verification(verification, {item.chunk_id: item for item in evidence})
+    unique = _first_unique([*sides, *evidence], 2)
+    if len(unique) < 2:
+        return evidence[:2]
+    return unique
+
+
+def _sides_from_verification(
+    verification: Verification | None,
+    by_id: dict[str, Evidence],
+) -> list[Evidence]:
+    if verification is None:
+        return []
+    sides: list[Evidence] = []
+    for item in verification.contradictions:
+        left = by_id.get(item.left_chunk_id)
+        right = by_id.get(item.right_chunk_id)
+        if left is not None:
+            sides.append(left)
+        if right is not None:
+            sides.append(right)
+        if len(sides) >= 2:
+            break
+    return sides
+
+
+def _first_unique(items: list[Evidence], limit: int) -> list[Evidence]:
+    unique: list[Evidence] = []
+    seen: set[str] = set()
+    for item in items:
+        if item.chunk_id in seen:
+            continue
+        seen.add(item.chunk_id)
+        unique.append(item)
+        if len(unique) >= limit:
+            break
+    return unique
 
 
 def _legacy_status(question: str, evidence: list[Evidence]) -> GroundingStatus:
