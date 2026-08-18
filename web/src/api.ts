@@ -7,7 +7,7 @@ import type {
 } from './types'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/malha'
-const TOKEN = import.meta.env.VITE_MIND_TOKEN ?? 'mind-demo-atlas-norte'
+const TOKEN = import.meta.env.VITE_MIND_TOKEN || 'mind-demo-atlas-norte'
 const SAFE_ID = /^[A-Za-z0-9._-]+$/
 
 export function assertSafeId(value: string): string {

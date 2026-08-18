@@ -9,6 +9,46 @@ def _headers(token: str) -> dict[str, str]:
     return {"X-Mind-Token": token}
 
 
+def test_root_and_health_are_ok(mesh) -> None:
+    client = TestClient(create_app(mesh))
+    root = client.get("/")
+    assert root.status_code == 200
+    assert root.json()["status"] == "ok"
+    assert root.json()["product"] == "mind-shared"
+    health = client.get("/health")
+    assert health.status_code == 200
+
+
+def test_query_accepts_workspace_slug(mesh) -> None:
+    client = TestClient(create_app(mesh))
+    created = client.post(
+        "/workspaces", json={"slug": "atlas-norte", "name": "Arquivo Atlas Norte"}
+    ).json()
+    headers = _headers(created["token"])
+    seeded = client.post(f"/workspaces/{created['id']}/seed", headers=headers)
+    assert seeded.status_code == 200
+    queried = client.post(
+        "/workspaces/atlas-norte/query",
+        json={"question": "TotalRecall autentica o usuário na Carteira Mind?", "hops": 1},
+        headers=headers,
+    )
+    assert queried.status_code == 200
+    assert queried.json()["evidence"]
+    asked = client.post(
+        "/v1/ask",
+        json={
+            "workspace_id": "atlas-norte",
+            "question": "TotalRecall autentica o usuário na Carteira Mind?",
+            "hops": 1,
+        },
+        headers=headers,
+    )
+    assert asked.status_code == 200
+    docs = client.get("/workspaces/atlas-norte/documents", headers=headers)
+    assert docs.status_code == 200
+    assert docs.json()
+
+
 def test_health_and_query_roundtrip(mesh) -> None:
     client = TestClient(create_app(mesh))
     health = client.get("/health")

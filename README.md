@@ -21,16 +21,29 @@ Em outro terminal:
 make serve-web
 ```
 
-- API: http://127.0.0.1:8000 (contrato em `/docs` e `/openapi.json`)
+- API: http://127.0.0.1:8000 (`/`, `/health`, contrato em `/docs`)
 - Atlas: http://127.0.0.1:5173
 
-O seed cria o espaço `atlas-norte` (Arquivo Atlas Norte) e imprime o **token de demo**. Rotas de consulta, ingestão, grafo e eval exigem o header `X-Mind-Token`.
+O seed cria o espaço `atlas-norte` (Arquivo Atlas Norte) e imprime o **token de demo**. Rotas de consulta, ingestão, grafo e eval exigem o header `X-Mind-Token`. O identificador na URL pode ser o slug (`atlas-norte`) ou o id interno.
 
 Token de fixture (não é segredo de produção):
 
 ```
 X-Mind-Token: mind-demo-atlas-norte
 ```
+
+Prova da API (depois de `make seed` e `make serve-api`):
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/health
+curl -sS -D - -o /tmp/mind-query.json \
+  -X POST http://127.0.0.1:8000/workspaces/atlas-norte/query \
+  -H 'Content-Type: application/json' \
+  -H 'X-Mind-Token: mind-demo-atlas-norte' \
+  -d '{"question":"Quem pode acessar dados de produção da carteira?","hops":1}'
+```
+
+Esperado: `200` no health e `HTTP/1.1 200 OK` na query.
 
 O atlas local envia esse token por padrão (`VITE_MIND_TOKEN`). O corpus inclui políticas, decisão PIX, postmortem, tenancy, norma de evidências e um conflito deliberado (circular legado vs. decisão nova).
 

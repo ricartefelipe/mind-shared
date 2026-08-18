@@ -30,6 +30,15 @@ class WorkspaceBook:
             raise KeyError(workspace_id)
         return dict(row)
 
+    def resolve(self, ref: str) -> dict[str, str]:
+        try:
+            return self.get(ref)
+        except KeyError:
+            found = self.by_slug(ref)
+            if found is None:
+                raise KeyError(ref) from None
+            return found
+
     def by_slug(self, slug: str) -> dict[str, str] | None:
         row = self.store.fetchone(
             "SELECT id, slug, name, created_at FROM workspaces WHERE slug = ?",

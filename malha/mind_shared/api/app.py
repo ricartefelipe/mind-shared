@@ -44,12 +44,33 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    def _authorize(workspace_id: str, token: str | None) -> None:
+    def _workspace(ref: str) -> str:
+        try:
+            return engine.workspaces.resolve(ref)["id"]
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="espaço não encontrado",
+            ) from exc
+
+    def _authorize(workspace_ref: str, token: str | None) -> str:
+        workspace_id = _workspace(workspace_ref)
         if not engine.tokens.verify(workspace_id, token):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="token ausente ou inválido",
             )
+        return workspace_id
+
+    @app.get("/")
+    def root() -> dict[str, str]:
+        return {
+            "status": "ok",
+            "product": "mind-shared",
+            "health": "/health",
+            "docs": "/docs",
+            "openapi": "/openapi.json",
+        }
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -75,7 +96,7 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         workspace_id: str,
         x_mind_token: Annotated[str | None, Header()] = None,
     ) -> list[dict[str, str | int]]:
-        _authorize(workspace_id, x_mind_token)
+        workspace_id = _authorize(workspace_id, x_mind_token)
         return engine.documents(workspace_id)
 
     @app.get("/workspaces/{workspace_id}/graph")
@@ -83,7 +104,7 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         workspace_id: str,
         x_mind_token: Annotated[str | None, Header()] = None,
     ) -> GraphOut:
-        _authorize(workspace_id, x_mind_token)
+        workspace_id = _authorize(workspace_id, x_mind_token)
         snap = engine.graph_snapshot(workspace_id)
         return GraphOut(
             entities=snap["entities"],
@@ -100,7 +121,7 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         file: Annotated[UploadFile, File()],
         x_mind_token: Annotated[str | None, Header()] = None,
     ) -> dict[str, str | int]:
-        _authorize(workspace_id, x_mind_token)
+        workspace_id = _authorize(workspace_id, x_mind_token)
         data = await file.read()
         try:
             return engine.ingest_upload(workspace_id, file.filename or "arquivo.txt", data)
@@ -115,7 +136,7 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         workspace_id: str,
         x_mind_token: Annotated[str | None, Header()] = None,
     ) -> dict[str, object]:
-        _authorize(workspace_id, x_mind_token)
+        workspace_id = _authorize(workspace_id, x_mind_token)
         ingested = engine.ingest_corpus(workspace_id, corpus_dir())
         return {"ingested": ingested}
 
@@ -125,7 +146,7 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         body: QueryIn,
         x_mind_token: Annotated[str | None, Header()] = None,
     ) -> QueryOut:
-        _authorize(workspace_id, x_mind_token)
+        workspace_id = _authorize(workspace_id, x_mind_token)
         result = engine.query(workspace_id, body.question, hops=body.hops)
         return query_out(result)
 
@@ -134,8 +155,8 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         body: AskIn,
         x_mind_token: Annotated[str | None, Header()] = None,
     ) -> QueryOut:
-        _authorize(body.workspace_id, x_mind_token)
-        result = engine.query(body.workspace_id, body.question, hops=body.hops)
+        workspace_id = _authorize(body.workspace_id, x_mind_token)
+        result = engine.query(workspace_id, body.question, hops=body.hops)
         return query_out(result)
 
     @app.post(
@@ -147,7 +168,7 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         body: FeedbackIn,
         x_mind_token: Annotated[str | None, Header()] = None,
     ) -> dict[str, str]:
-        _authorize(workspace_id, x_mind_token)
+        workspace_id = _authorize(workspace_id, x_mind_token)
         try:
             feedback_id = engine.mark_feedback(
                 workspace_id,
@@ -167,7 +188,7 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         workspace_id: str,
         x_mind_token: Annotated[str | None, Header()] = None,
     ) -> dict[str, object]:
-        _authorize(workspace_id, x_mind_token)
+        workspace_id = _authorize(workspace_id, x_mind_token)
         gold = Path(__file__).resolve().parent.parent.parent / "eval" / "gold.json"
         return run_harness(engine, workspace_id, gold)
 

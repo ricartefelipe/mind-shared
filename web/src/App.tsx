@@ -79,18 +79,34 @@ export function App() {
   }, [workspaceId, view])
 
   async function bootstrap() {
-    const list = await listWorkspaces()
-    setWorkspaces(list)
-    if (list[0]) {
-      setWorkspaceId(list[0].id)
+    try {
+      const list = await listWorkspaces()
+      setWorkspaces(list)
+      if (list[0]) {
+        setWorkspaceId(list[0].id)
+        return
+      }
+      setNotice('Nenhum espaço. Rode make seed e depois make serve-api.')
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? `Malha indisponível: ${error.message}`
+          : 'Malha indisponível. Suba a API com make serve-api.',
+      )
     }
   }
 
   async function refreshArchive(id: string) {
-    const docs = await listDocuments(id)
-    setDocuments(docs)
-    if (view === 'grafo') {
-      setGraph(await fetchGraph(id))
+    try {
+      const docs = await listDocuments(id)
+      setDocuments(docs)
+      if (view === 'grafo') {
+        setGraph(await fetchGraph(id))
+      }
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : 'falha ao ler o arquivo',
+      )
     }
   }
 
