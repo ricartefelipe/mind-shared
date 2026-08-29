@@ -24,12 +24,20 @@
       "types": "./dist/qrPayload.d.ts",
       "import": "./dist/qrPayload.js"
     },
-    "./openapi": "./openapi/vuemind-wallet-openapi.yaml"
+    "./openapi": "./openapi/vuemind-wallet-openapi.yaml",
+    "./archive": {
+      "types": "./dist/archive/client.d.ts",
+      "import": "./dist/archive/client.js"
+    },
+    "./archive/types": {
+      "types": "./dist/archive/types.d.ts",
+      "import": "./dist/archive/types.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test test/totalrecall-provision.test.mjs test/pix-key.test.mjs test/wallet-handlers.test.mjs test/pix-notifications.test.mjs",
+    "test": "npm run build && node --test test/totalrecall-provision.test.mjs test/pix-key.test.mjs test/wallet-handlers.test.mjs test/pix-notifications.test.mjs test/archive-client.test.mjs",
     "test:exports": "npm run build && node --input-type=module -e \"import('./dist/msw.js').then(({ createMindHandlers }) => console.log(createMindHandlers().length))\"",
     "sync:apps": "./scripts/sync-into-apps.sh"
   },

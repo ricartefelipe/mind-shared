@@ -114,4 +114,19 @@ O pacote npm da raiz permanece o contrato compartilhado da Carteira Mind (handle
 }
 ```
 
-Após alterar o contrato: `npm run sync:apps`.
+Exports adicionais:
+
+- `@ricartefelipe/mind-wallet-shared/archive` — cliente HTTP da malha (`createArchiveClient`)
+- `@ricartefelipe/mind-wallet-shared/archive/types` — tipos de evidência, consulta e grafo
+
+Após alterar o contrato: `npm run build` na raiz e `npm run sync:apps` para copiar o OpenAPI da carteira.
+
+### Arquivo na Carteira (ReactMind)
+
+O ReactMind expõe `/arquivo` com consulta, documentos e grafo. Em desenvolvimento:
+
+1. Na pasta `mind-shared`: `make seed && make serve-api`
+2. Na pasta `reactmind`: `npm run dev` (proxy `/malha` → API local)
+3. Entre na carteira e abra **Arquivo** no menu
+
+Variáveis opcionais no ReactMind: `VITE_MALHA_URL` (padrão `/malha`), `VITE_MIND_TOKEN` (padrão `mind-demo-atlas-norte`).
