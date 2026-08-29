@@ -15,7 +15,11 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+    "paths": {
+      "@ricartefelipe/mind-wallet-shared/archive": ["../dist/archive/client"],
+      "@ricartefelipe/mind-wallet-shared/archive/types": ["../dist/archive/types"]
+    }
   },
   "include": ["src"]
 }
