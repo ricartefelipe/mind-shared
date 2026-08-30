@@ -96,7 +96,7 @@ class QueryOut(BaseModel):
     evidence: list[EvidenceOut]
     plan: list[PlanStepOut]
     verification: VerificationOut
-    composer: Literal["extractive", "http"]
+    composer: Literal["extractive", "http", "local"]
 
 
 class GraphConflictOut(BaseModel):

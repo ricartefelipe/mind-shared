@@ -19,6 +19,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.3.0"]
 embeddings = ["sentence-transformers>=3.0.0"]
+llm = ["llama-cpp-python>=0.3.0", "huggingface-hub>=0.24.0"]
+ai = ["sentence-transformers>=3.0.0", "llama-cpp-python>=0.3.0", "huggingface-hub>=0.24.0"]
 
 [project.scripts]
 mind-shared = "mind_shared.cli:main"
