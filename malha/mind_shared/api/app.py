@@ -17,7 +17,16 @@ from mind_shared.api.schemas import (
     WorkspaceOut,
     query_out,
 )
-from mind_shared.config import corpus_dir, default_db_path
+from mind_shared.config import (
+    composer_backend,
+    composer_gguf_path,
+    composer_model,
+    composer_url,
+    corpus_dir,
+    default_db_path,
+    embedding_backend_name,
+    embedding_model_name,
+)
 from mind_shared.engine import Mesh
 from mind_shared.eval.harness import run_harness
 from mind_shared.ingest.parsers import UnsupportedFormatError
@@ -38,7 +47,12 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
     app = FastAPI(title="Mind Shared", version="0.2.0")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+        allow_origins=[
+            "http://127.0.0.1:5173",
+            "http://localhost:5173",
+            "http://127.0.0.1:5174",
+            "http://localhost:5174",
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -73,8 +87,22 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         }
 
     @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok", "product": "mind-shared"}
+    def health() -> dict[str, str | None]:
+        embedding = type(engine.embedding).__name__
+        llm_url = composer_url()
+        backend = composer_backend()
+        return {
+            "status": "ok",
+            "product": "mind-shared",
+            "composer": engine.composer.name,
+            "composer_backend": backend or None,
+            "composer_model": composer_model() if llm_url else None,
+            "composer_url": llm_url or None,
+            "composer_gguf": str(composer_gguf_path()) if backend == "local" else None,
+            "embedding": embedding,
+            "embedding_model": embedding_model_name() or None,
+            "embedding_backend": embedding_backend_name() or None,
+        }
 
     @app.get("/workspaces")
     def list_workspaces() -> list[dict[str, str]]:

@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Literal, Never
 
 PlanKind = Literal["lookup", "hop", "compare"]
-ComposerName = Literal["extractive", "http"]
+ComposerName = Literal["extractive", "http", "local"]
 
 
 class EntityType(str, Enum):

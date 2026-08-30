@@ -1,12 +1,27 @@
 services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+
   api:
     build: ./malha
     ports:
       - "8000:8000"
     environment:
       MIND_SHARED_DB: /data/mesh.sqlite
+      MIND_COMPOSER_URL: http://ollama:11434
+      MIND_COMPOSER_MODEL: llama3.2:3b
+      MIND_COMPOSER_TIMEOUT_SECONDS: "120"
+      MIND_EMBEDDING_BACKEND: sentence
+      MIND_EMBEDDING_MODEL: all-MiniLM-L6-v2
     volumes:
       - mind-data:/data
+    depends_on:
+      - ollama
 
   web:
     build: ./web
@@ -20,3 +35,4 @@ services:
 
 volumes:
   mind-data:
+  ollama-data:

@@ -4,7 +4,8 @@ from typing import Protocol
 
 import httpx
 
-from mind_shared.config import COMPOSER_TIMEOUT_SECONDS, composer_model, composer_url
+from mind_shared.config import composer_backend, composer_model, composer_timeout_seconds, composer_url
+from mind_shared.synthesize.local_gguf import LocalGgufComposer
 from mind_shared.synthesize.grounded import synthesize
 from mind_shared.types import ComposerName, Evidence, GroundedAnswer, GroundingStatus, Verification
 
@@ -70,7 +71,7 @@ class HttpComposer:
             response = httpx.post(
                 f"{self.url}/v1/chat/completions",
                 json=payload,
-                timeout=COMPOSER_TIMEOUT_SECONDS,
+                timeout=composer_timeout_seconds(),
             )
             response.raise_for_status()
             text = str(response.json()["choices"][0]["message"]["content"]).strip()
@@ -92,10 +93,16 @@ class HttpComposer:
 
 
 def load_composer() -> Composer:
+    fallback = ExtractiveComposer()
+    backend = composer_backend()
+    if backend == "local":
+        return LocalGgufComposer(fallback)
     url = composer_url()
-    if not url:
-        return ExtractiveComposer()
-    return HttpComposer(url, composer_model(), ExtractiveComposer())
+    if url:
+        return HttpComposer(url, composer_model(), fallback)
+    if backend == "http":
+        return fallback
+    return fallback
 
 
 def _numbered(evidence: list[Evidence]) -> str:

@@ -8,6 +8,7 @@ __pycache__/
 .env.*
 data/
 malha/data/
+malha/models/
 web/dist/
 .pytest_cache/
 *.egg-info/

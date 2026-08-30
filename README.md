@@ -45,6 +45,26 @@ curl -sS -D - -o /tmp/mind-query.json \
 
 Esperado: `200` no health e `HTTP/1.1 200 OK` na query.
 
+## Modo IA (estudo)
+
+Instala LLM local (GGUF via `llama-cpp-python`), embeddings neurais (`sentence-transformers`) e reindexa o corpus. Primeira execução baixa o modelo (~400 MB).
+
+```bash
+make ai-up          # install + download GGUF + reseed
+make serve-api-ai   # API com malha/env.ai
+make serve-web      # atlas em outro terminal
+```
+
+Confirme em `/health`:
+
+- `composer`: `local` (LLM) ou `http` (Ollama/OpenAI-compatível)
+- `embedding`: `SentenceEmbedding`
+- `composer_gguf`: caminho do modelo
+
+Variáveis em `malha/env.ai`. Resposta da query inclui `"composer": "local"` quando o LLM gerou o texto.
+
+Modo legado (sem LLM): `make serve-api` (compositor extrativo + embeddings hash).
+
 O atlas local envia esse token por padrão (`VITE_MIND_TOKEN`). O corpus inclui políticas, decisão PIX, postmortem, tenancy, norma de evidências e um conflito deliberado (circular legado vs. decisão nova).
 
 Docker:
@@ -75,12 +95,16 @@ Métricas: **recall@k**, **faithfulness** (citações ⊆ evidências; pergunta 
 plan      → subobjetivos de recuperação (regras, sem rede)
 retrieve  → BM25 + denso + grafo multi-hop, fusão RRF por subobjetivo
 verify    → cobertura, contradições, selo grounded | conflict | insufficient
-compose   → síntese só com spans ligados a IDs; recusa ou relato dos dois lados
+compose   → síntese com spans ligados a IDs; LLM local, HTTP ou extrativo
 ```
 
-Compositor padrão: extrativo/template, sem chave e sem GPU. Compositor HTTP opcional: `MIND_COMPOSER_URL` e `MIND_COMPOSER_MODEL` (API compatível com `/v1/chat/completions`). Se o endpoint cair, a malha volta ao extrativo; o boot não falha.
+Compositor (escolha via env, ver `malha/env.ai`):
 
-Embeddings padrão: hashing trick determinístico. Neural opcional: extra `embeddings` e `MIND_EMBEDDING_MODEL` (ou o pacote instalado). A imagem Docker não leva o extra pesado.
+- **`local`** — GGUF com `llama-cpp-python` (`MIND_COMPOSER_BACKEND=local`)
+- **`http`** — API OpenAI-compatível (`MIND_COMPOSER_URL`, ex. Ollama)
+- **`extractive`** — padrão sem env de IA; template com citações
+
+Embeddings: hashing por padrão; neurais com `make ai-up` (`MIND_EMBEDDING_BACKEND=sentence`). A imagem Docker pode usar Ollama no `docker-compose.yml`.
 
 Persistência: SQLite (`MIND_SHARED_DB`, padrão `data/mesh.sqlite`).
 
