@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from mind_shared.config import GRAPH_HOPS_DEFAULT
+from mind_shared.config import DEFAULT_TOKEN_TTL_DAYS, GRAPH_HOPS_DEFAULT
 from mind_shared.types import (
     Contradiction,
     Evidence,
@@ -26,6 +26,20 @@ class WorkspaceOut(BaseModel):
     name: str
     created_at: str
     token: str | None = None
+
+
+class TokenIn(BaseModel):
+    role: Literal["reader", "editor", "admin"] = "reader"
+    label: str = Field(default="token", min_length=1, max_length=80)
+    ttl_days: int | None = Field(default=DEFAULT_TOKEN_TTL_DAYS, ge=1, le=3650)
+
+
+class TokenOut(BaseModel):
+    id: str
+    token: str
+    role: str
+    label: str
+    expires_at: str | None
 
 
 class QueryIn(BaseModel):

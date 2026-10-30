@@ -1,14 +1,25 @@
-FROM python:3.12-slim
+FROM python:3.12-alpine
 
 WORKDIR /app
 
-RUN groupadd --system app \
-  && useradd --system --gid app --home /app --no-create-home app \
+# Alpine recebe as correções publicadas; o pip/setuptools/wheel só servem ao build e saem da
+# imagem final para não carregar vulnerabilidades de ferramenta.
+RUN apk upgrade --no-cache \
+  && addgroup -S app \
+  && adduser -S -G app -h /app -H app \
   && mkdir -p /data \
   && chown app:app /data
 
 COPY requirements.lock /app/requirements.lock
-RUN pip install --no-cache-dir --only-binary :all: --require-hashes -r /app/requirements.lock
+RUN pip install --no-cache-dir --only-binary :all: --require-hashes -r /app/requirements.lock \
+  && pip uninstall -y pip setuptools wheel >/dev/null 2>&1 || true \
+  && rm -rf /usr/local/lib/python3.12/ensurepip \
+     /usr/local/lib/python3.12/site-packages/pip* \
+     /usr/local/lib/python3.12/site-packages/setuptools* \
+     /usr/local/lib/python3.12/site-packages/wheel* \
+     /usr/local/lib/python3.12/site-packages/_distutils_hack \
+     /usr/local/lib/python3.12/site-packages/pkg_resources \
+     /usr/local/bin/pip* /usr/local/bin/wheel
 
 COPY pyproject.toml /app/pyproject.toml
 COPY mind_shared /app/mind_shared

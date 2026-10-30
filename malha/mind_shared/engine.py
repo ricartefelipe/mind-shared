@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from mind_shared.auth.tokens import TokenBook
+from mind_shared.auth.tokens import Role, TokenBook
 from mind_shared.config import GRAPH_HOPS_DEFAULT
 from mind_shared.graph.conflicts import graph_conflicts
 from mind_shared.graph.extract import GraphIndex
@@ -55,9 +55,65 @@ class Mesh:
         )
 
     def provision_workspace(self, slug: str, name: str) -> dict[str, str]:
+        """Cria o espaço e o seu primeiro token (administrador). O token só é devolvido aqui."""
         workspace = self.workspaces.create(slug, name)
-        token = self.tokens.issue(workspace["id"], slug)
-        return {**workspace, "token": token}
+        issued = self.tokens.issue(
+            workspace["id"], slug, role=Role.ADMIN, label="admin inicial", ttl_days=None, demo=True
+        )
+        return {**workspace, "token": issued.token, "token_id": issued.id}
+
+    def delete_document(self, workspace_id: str, document_id: str) -> dict[str, int]:
+        """Remove o documento e tudo o que derivou dele — trechos, índice BM25, embeddings,
+        ligações do grafo, feedback — numa única transação. Entidades e relações que só
+        existiam por esse documento saem também; as compartilhadas com outros documentos ficam.
+        Nada fica visível pela metade: ou a exclusão inteira vale, ou nada muda."""
+        with self.store.transaction() as con:
+            document = con.execute(
+                "SELECT id FROM documents WHERE id = ? AND workspace_id = ?",
+                (document_id, workspace_id),
+            ).fetchone()
+            if document is None:
+                raise KeyError(document_id)
+            chunk_ids = [
+                row["id"]
+                for row in con.execute("SELECT id FROM chunks WHERE document_id = ?", (document_id,))
+            ]
+            removed = {"chunks": len(chunk_ids), "terms": 0, "feedback": 0, "entities": 0, "relations": 0}
+            if chunk_ids:
+                marks = ",".join("?" * len(chunk_ids))
+                removed["terms"] = con.execute(
+                    f"DELETE FROM terms WHERE chunk_id IN ({marks})", chunk_ids
+                ).rowcount
+                removed["feedback"] = con.execute(
+                    f"DELETE FROM feedback WHERE chunk_id IN ({marks})", chunk_ids
+                ).rowcount
+                con.execute(f"DELETE FROM entity_chunks WHERE chunk_id IN ({marks})", chunk_ids)
+                removed["relations"] = con.execute(
+                    f"DELETE FROM relations WHERE evidence_chunk_id IN ({marks})", chunk_ids
+                ).rowcount
+                con.execute(f"DELETE FROM chunks WHERE id IN ({marks})", chunk_ids)
+            con.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+            orphan_entities = [
+                row["id"]
+                for row in con.execute(
+                    """
+                    SELECT e.id FROM entities e
+                    WHERE e.workspace_id = ?
+                      AND NOT EXISTS (SELECT 1 FROM entity_chunks ec WHERE ec.entity_id = e.id)
+                    """,
+                    (workspace_id,),
+                )
+            ]
+            if orphan_entities:
+                marks = ",".join("?" * len(orphan_entities))
+                removed["relations"] += con.execute(
+                    f"DELETE FROM relations WHERE src_entity_id IN ({marks}) OR dst_entity_id IN ({marks})",
+                    orphan_entities + orphan_entities,
+                ).rowcount
+                removed["entities"] = con.execute(
+                    f"DELETE FROM entities WHERE id IN ({marks})", orphan_entities
+                ).rowcount
+        return removed
 
     def ingest_path(self, workspace_id: str, path: Path) -> dict[str, str | int]:
         parsed = parse_path(path)

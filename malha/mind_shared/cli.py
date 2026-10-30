@@ -5,7 +5,14 @@ from pathlib import Path
 
 import uvicorn
 
-from mind_shared.config import FAITHFULNESS_FLOOR, corpus_dir, default_db_path
+from mind_shared.auth.tokens import Role
+from mind_shared.config import (
+    DEFAULT_TOKEN_TTL_DAYS,
+    FAITHFULNESS_FLOOR,
+    corpus_dir,
+    default_db_path,
+    demo_allowed,
+)
 from mind_shared.engine import Mesh
 from mind_shared.eval.harness import run_harness
 
@@ -21,6 +28,13 @@ def main() -> None:
     seed.add_argument("--name", default="Arquivo Atlas Norte")
     evaluate = sub.add_parser("eval")
     evaluate.add_argument("--slug", default="atlas-norte")
+    backup = sub.add_parser("backup", help="cópia consistente do banco SQLite (API de backup, segura com WAL)")
+    backup.add_argument("destination")
+    token = sub.add_parser("token", help="emite um token para um espaço (sem passar pela API)")
+    token.add_argument("--slug", required=True)
+    token.add_argument("--role", choices=[r.value for r in Role], default=Role.READER.value)
+    token.add_argument("--label", default="cli")
+    token.add_argument("--ttl-days", type=int, default=DEFAULT_TOKEN_TTL_DAYS)
     args = parser.parse_args()
     if args.cmd == "serve":
         uvicorn.run(
@@ -32,7 +46,22 @@ def main() -> None:
         )
         return
     mesh = Mesh(default_db_path())
+    if args.cmd == "backup":
+        path = mesh.store.backup(Path(args.destination))
+        print(f"backup consistente gravado em {path} ({path.stat().st_size} bytes)")
+        return
+    if args.cmd == "token":
+        workspace = mesh.workspaces.by_slug(args.slug)
+        if workspace is None:
+            raise SystemExit(f"espaço não encontrado: {args.slug}")
+        issued = mesh.tokens.issue(
+            workspace["id"], args.slug, role=Role(args.role), label=args.label, ttl_days=args.ttl_days
+        )
+        print(f"token ({issued.role.value}, expira em {issued.expires_at}): {issued.token}")
+        return
     if args.cmd == "seed":
+        if not demo_allowed():
+            raise SystemExit("seed de demonstração indisponível em MIND_PROFILE=remote")
         workspace = mesh.provision_workspace(args.slug, args.name)
         ingested = mesh.ingest_corpus(workspace["id"], corpus_dir())
         print(f"espaço {workspace['slug']}: {len(ingested)} documentos")

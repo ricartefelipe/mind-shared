@@ -24,7 +24,8 @@ make serve-web
 - API: http://127.0.0.1:8000 (`/`, `/health`, contrato em `/docs`)
 - Atlas: http://127.0.0.1:5173
 
-O seed cria o espaço `atlas-norte` (Arquivo Atlas Norte) e imprime o **token de demo**. Rotas de consulta, ingestão, grafo e eval exigem o header `X-Mind-Token`. O identificador na URL pode ser o slug (`atlas-norte`) ou o id interno.
+O seed cria o espaço `atlas-norte` (Arquivo Atlas Norte) e imprime o **token de demo** — isso só
+existe no perfil `local` (veja "Perfis, credenciais e papéis" abaixo). Rotas de consulta, ingestão, grafo e eval exigem o header `X-Mind-Token`. O identificador na URL pode ser o slug (`atlas-norte`) ou o id interno.
 
 Token de fixture (não é segredo de produção):
 
@@ -44,6 +45,56 @@ curl -sS -D - -o /tmp/mind-query.json \
 ```
 
 Esperado: `200` no health e `HTTP/1.1 200 OK` na query.
+
+## Perfis, credenciais e papéis
+
+| Perfil (`MIND_PROFILE`) | Para quê | Demo | Criar espaços |
+|---|---|---|---|
+| `local` (padrão) | máquina do operador, `serve` em `127.0.0.1` | token fixo `mind-demo-atlas-norte` e seed do corpus de exemplo | livre |
+| `remote` | instalação exposta a outras pessoas | **não existe**: o token de demo não é emitido nem aceito, o seed responde 404 e o espaço `atlas-norte` não pode ser criado | só com `X-Mind-Admin-Token` igual a `MIND_ADMIN_TOKEN` (obrigatório; sem ele a API não sobe) |
+
+Todo token pertence a **um** espaço: conhecer o id ou o slug de outro espaço não dá acesso. Cada
+token tem papel, validade (padrão 90 dias) e pode ser revogado; só o hash fica no banco e a listagem
+nunca devolve o valor.
+
+| Papel | Pode |
+|---|---|
+| `reader` | consultar, ler documentos e grafo |
+| `editor` | + ingerir, dar feedback, **excluir documentos** |
+| `admin` | + emitir, listar e revogar tokens do espaço |
+
+```http
+POST   /workspaces                                      # X-Mind-Admin-Token no perfil remote; devolve o token admin inicial uma vez
+POST   /workspaces/{id}/tokens   {"role":"reader","label":"leitor","ttl_days":30}   # admin
+GET    /workspaces/{id}/tokens                           # admin (sem o valor dos tokens)
+DELETE /workspaces/{id}/tokens/{token_id}                # admin: revoga; o token deixa de valer na hora
+DELETE /workspaces/{id}/documents/{document_id}          # editor: remove documento, trechos, BM25, embeddings, grafo e feedback numa transação
+```
+
+Pela linha de comando: `mind-shared token --slug atlas-norte --role reader --ttl-days 30`.
+
+## Operação
+
+- **Persistência:** SQLite em WAL com `busy_timeout` de 5 s; escritores concorrentes esperam em vez de
+  falhar. Validado com 4 escritores e 3 leitores simultâneos. Para vários processos, o arquivo precisa
+  estar em filesystem local (não em NFS/SMB).
+- **Backup consistente:** `mind-shared backup <destino.sqlite>` usa a API de backup do SQLite (válida
+  com WAL e com escritas em curso). Restaurar é apontar `MIND_SHARED_DB` para a cópia; documentos,
+  índices, grafo, tokens e permissões vêm junto — validado por teste que consulta a cópia e obtém as
+  mesmas evidências.
+- **Exclusão/retificação:** `DELETE .../documents/{id}` é atômico (tudo ou nada) e alcança trechos,
+  termos BM25, embeddings, ligações do grafo, entidades/relações que só existiam por aquele documento
+  e feedback. O histórico de perguntas guarda só o texto da pergunta. Retificar é excluir e ingerir de
+  novo.
+- **Rede:** o modo padrão funciona sem internet (composer extrativo e embeddings por hashing). Egress
+  só acontece com `MIND_COMPOSER_URL` (Ollama/HTTP) ou modelos externos configurados explicitamente;
+  o campo `composer` da resposta diz qual foi usado. Conteúdo de documento é dado, nunca instrução:
+  instruções embutidas num documento não mudam o sistema nem revelam tokens (teste
+  `test_prompt_injection_in_a_document_is_treated_as_data`).
+- **CI (`.github/workflows/ci.yml`):** testes da malha (51), avaliação offline no corpus de exemplo
+  (3 casos sem resposta, conflito deliberado entre circular legada e decisão nova), pacote da carteira,
+  typecheck/build do atlas, `npm audit` de produção, build e scan bloqueante (HIGH/CRITICAL) da imagem
+  da API e prova de que o perfil `remote` não sobe sem token de administração. Nenhuma chamada paga.
 
 ## Modo IA (estudo)
 
