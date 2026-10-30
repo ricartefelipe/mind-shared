@@ -1,0 +1,2 @@
+# Dependências de teste (sem hashes) para `pip-compile --generate-hashes`; a CI instala só requirements-dev.lock.
+pytest==9.0.3
