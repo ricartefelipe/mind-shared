@@ -13,7 +13,13 @@ RUN apk upgrade --no-cache \
 COPY requirements.lock /app/requirements.lock
 RUN pip install --no-cache-dir --only-binary :all: --require-hashes -r /app/requirements.lock \
   && pip uninstall -y pip setuptools wheel >/dev/null 2>&1 || true \
-  && rm -rf /usr/local/lib/python3.12/ensurepip /usr/local/lib/python3.12/site-packages/pip* /usr/local/lib/python3.12/site-packages/setuptools* /usr/local/lib/python3.12/site-packages/wheel* /usr/local/lib/python3.12/site-packages/_distutils_hack /usr/local/lib/python3.12/site-packages/pkg_resources /usr/local/bin/pip* /usr/local/bin/wheel
+  && rm -rf /usr/local/lib/python3.12/ensurepip \
+     /usr/local/lib/python3.12/site-packages/pip* \
+     /usr/local/lib/python3.12/site-packages/setuptools* \
+     /usr/local/lib/python3.12/site-packages/wheel* \
+     /usr/local/lib/python3.12/site-packages/_distutils_hack \
+     /usr/local/lib/python3.12/site-packages/pkg_resources \
+     /usr/local/bin/pip* /usr/local/bin/wheel
 
 COPY pyproject.toml /app/pyproject.toml
 COPY mind_shared /app/mind_shared

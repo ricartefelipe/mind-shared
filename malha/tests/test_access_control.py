@@ -41,8 +41,9 @@ def test_demo_token_is_refused_in_remote_profile(tmp_path, monkeypatch) -> None:
     created = mesh.provision_workspace("atlas-norte", "Arquivo Atlas Norte")
     assert created["token"] != DEMO_TOKEN
     assert mesh.tokens.authenticate(created["id"], DEMO_TOKEN) is None
+    workspace_id = created["id"]
     with pytest.raises(PermissionError):
-        mesh.tokens.issue(created["id"], "atlas-norte", token=DEMO_TOKEN)
+        mesh.tokens.issue(workspace_id, "atlas-norte", token=DEMO_TOKEN)
 
     client = TestClient(create_app(mesh))
     # Seed e espaço de demonstração não existem no perfil remoto.
@@ -68,7 +69,8 @@ def test_roles_limit_each_route(atlas) -> None:
     admin_token = DEMO_TOKEN
     reader = client.post(f"/workspaces/{workspace_id}/tokens", json={"role": "reader", "label": "leitor"}, headers=headers(admin_token))
     editor = client.post(f"/workspaces/{workspace_id}/tokens", json={"role": "editor", "label": "editor"}, headers=headers(admin_token))
-    assert reader.status_code == 201 and editor.status_code == 201
+    assert reader.status_code == 201
+    assert editor.status_code == 201
     reader_token = reader.json()["token"]
     editor_token = editor.json()["token"]
     documents = client.get(f"/workspaces/{workspace_id}/documents", headers=headers(reader_token)).json()
@@ -125,5 +127,6 @@ def test_old_database_without_token_columns_is_migrated(tmp_path) -> None:
 
     mesh = new_mesh(tmp_path, "antigo.sqlite")
     principal = mesh.tokens.authenticate("ws1", "token-antigo")
-    assert principal is not None and principal.role is Role.ADMIN  # token anterior continua válido, como administrador
+    assert principal is not None  # token anterior continua válido
+    assert principal.role is Role.ADMIN  # como administrador
     assert mesh.tokens.list("ws1")[0]["expires_at"] is None

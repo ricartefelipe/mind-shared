@@ -151,22 +151,35 @@ class Store:
     def transaction(self) -> Iterator[sqlite3.Connection]:
         """Escrita atômica: tudo ou nada, com rollback em qualquer exceção."""
         con = self.conn()
+        con.execute("BEGIN IMMEDIATE")
         try:
-            con.execute("BEGIN IMMEDIATE")
             yield con
-            con.commit()
         except BaseException:
             con.rollback()
             raise
+        else:
+            con.commit()
 
     def backup(self, destination: Path) -> Path:
         """Cópia consistente do banco (API de backup do SQLite, válida com WAL e com escritores ativos)."""
-        destination = Path(destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination = self._backup_destination(destination)
+        with sqlite3.connect(str(destination)) as target:
+            self.conn().backup(target)
+        return destination
+
+    def _backup_destination(self, raw: Path) -> Path:
+        """Destino explícito do operador: caminho absoluto resolvido, extensão .sqlite, em diretório já
+        existente, nunca o próprio banco (nem seus arquivos WAL/SHM) e nunca um arquivo existente."""
+        destination = Path(raw).expanduser().resolve()
+        live = self.path.resolve()
+        if destination.suffix != ".sqlite":
+            raise ValueError("o destino do backup deve terminar em .sqlite")
+        if destination == live or destination.parent == live.parent and destination.name.startswith(live.name):
+            raise ValueError("o destino do backup não pode ser o banco em uso")
+        if not destination.parent.is_dir():
+            raise ValueError(f"diretório do backup não existe: {destination.parent}")
         if destination.exists():
             raise FileExistsError(destination)
-        with sqlite3.connect(destination) as target:
-            self.conn().backup(target)
         return destination
 
     def conn(self) -> sqlite3.Connection:

@@ -35,7 +35,9 @@ def test_deleting_a_document_reaches_chunks_bm25_embeddings_graph_and_feedback(m
 
     removed = mesh.delete_document(ws, gone)
 
-    assert removed["chunks"] >= 1 and removed["terms"] >= 1 and removed["feedback"] == 1
+    assert removed["chunks"] >= 1
+    assert removed["terms"] >= 1
+    assert removed["feedback"] == 1
     assert _count(mesh, "SELECT count(*) FROM documents WHERE id = ?", gone) == 0
     assert _count(mesh, "SELECT count(*) FROM chunks WHERE document_id = ?", gone) == 0
     assert _count(mesh, "SELECT count(*) FROM terms WHERE chunk_id = ?", chunk) == 0
@@ -122,8 +124,20 @@ def test_backup_is_consistent_and_restored_copy_answers_with_same_evidence(atlas
     mesh, workspace_id = atlas
     question = "Quem pode acessar dados de produção da carteira?"
     original = mesh.query(workspace_id, question)
+    (tmp_path / "copia").mkdir()
     backup = mesh.store.backup(tmp_path / "copia" / "mesh.sqlite")
     assert backup.exists()
+    # o destino é validado: nunca o banco em uso, só .sqlite, só em diretório existente
+    import pytest
+
+    with pytest.raises(ValueError):
+        mesh.store.backup(mesh.store.path)
+    with pytest.raises(ValueError):
+        mesh.store.backup(tmp_path / "copia" / "mesh.db")
+    with pytest.raises(ValueError):
+        mesh.store.backup(tmp_path / "nao-existe" / "mesh.sqlite")
+    with pytest.raises(FileExistsError):
+        mesh.store.backup(backup)
 
     restored = Mesh(backup, embedding=HashingTrickEmbedding(), composer=ExtractiveComposer())
     assert restored.tokens.authenticate(workspace_id, DEMO_TOKEN) is not None  # permissões preservadas
@@ -145,7 +159,8 @@ def test_prompt_injection_in_a_document_is_treated_as_data(mesh) -> None:
     )
     result = mesh.query(ws, "Quem aprova o acesso ao cofre?")
     text = result.answer.text.lower()
-    assert "mind-demo" not in text and "x-mind-token" not in text
+    assert "mind-demo" not in text
+    assert "x-mind-token" not in text
     assert all(e.document_id != hostile for e in result.evidence) or result.answer.grounding_status != "grounded" or "diretoria" in text
     # o conteúdo hostil é só mais um documento: pode ser excluído e some dos índices
     mesh.delete_document(ws, hostile)
