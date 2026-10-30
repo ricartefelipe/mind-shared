@@ -28,7 +28,9 @@ services:
       - ollama
 
   web:
-    build: ./web
+    build:
+      context: .
+      dockerfile: web/Dockerfile
     ports:
       - "5173:5173"
     environment:
