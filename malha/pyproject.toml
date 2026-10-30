@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mind-shared"
-version = "0.2.1"
+version = "0.2.2"
 description = "Malha cognitiva compartilhada: índice híbrido, grafo e evidências com proveniência."
 requires-python = ">=3.12"
 dependencies = [
