@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  malha:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install (dev extras, offline backends only)
+        run: python -m pip install -e "./malha[dev]"
+      - name: Tests (API, retrieval, access control, retention, backup, concurrency)
+        working-directory: malha
+        run: |
+          python -m pytest -q -p no:warnings | tee pytest.txt
+          grep -E '^[0-9]+ passed' pytest.txt
+      - name: Offline evaluation on the demo corpus (extractive composer, hashing embeddings)
+        working-directory: malha
+        env:
+          MIND_SHARED_DB: ${{ runner.temp }}/mesh.sqlite
+        run: |
+          python -m mind_shared.cli seed
+          python -m mind_shared.cli eval
+
+  wallet-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=high
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: |
+          npm ci --ignore-scripts
+          npm run typecheck
+          npm run build
+          npm audit --omit=dev --audit-level=high
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the API image (same Dockerfile as Compose)
+        run: docker build -t mind-shared-api:ci malha
+      - name: Scan the final image (HIGH/CRITICAL block)
+        run: |
+          mkdir -p "$RUNNER_TEMP/trivy-cache"
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RUNNER_TEMP/trivy-cache:/root/.cache" \
+            aquasec/trivy:0.76.1 image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --skip-version-check mind-shared-api:ci
+      - name: Remote profile refuses to start without an admin token
+        run: |
+          set +e
+          docker run --rm -e MIND_PROFILE=remote mind-shared-api:ci python -c "from mind_shared.api.app import create_app; create_app()"
+          test $? -ne 0
