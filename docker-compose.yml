@@ -12,6 +12,10 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # Compose local de estudo: perfil local (demo e seed). Numa instalação exposta use
+      # MIND_PROFILE=remote e MIND_ADMIN_TOKEN (segredo próprio), e emita tokens por espaço.
+      MIND_PROFILE: ${MIND_PROFILE:-local}
+      MIND_ADMIN_TOKEN: ${MIND_ADMIN_TOKEN:-}
       MIND_SHARED_DB: /data/mesh.sqlite
       MIND_COMPOSER_URL: http://ollama:11434
       MIND_COMPOSER_MODEL: llama3.2:3b
