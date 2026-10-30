@@ -110,5 +110,9 @@ jobs:
           curl -fsS http://127.0.0.1:5173/src/api.ts | grep -q "fetchGraph"
           curl -fsS http://127.0.0.1:5173/src/types.ts >/dev/null
           curl -fsS "http://127.0.0.1:5173/src/api.ts" | grep -q "mind-wallet-shared"
-          docker logs atlas 2>&1 | grep -iE "could not be resolved|Pre-transform error" && exit 1 || true
+          docker logs atlas 2>&1 | tail -40
+          if docker logs atlas 2>&1 | grep -iE "could not be resolved|Pre-transform error"; then
+            echo "o servidor do atlas registrou módulo não resolvido" >&2
+            exit 1
+          fi
           docker rm -f atlas
