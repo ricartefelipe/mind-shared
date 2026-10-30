@@ -118,7 +118,9 @@ jobs:
           curl -fsS http://127.0.0.1:5173/ | grep -q "Mind Shared"
           curl -fsS http://127.0.0.1:5173/src/api.ts | grep -q "fetchGraph"
           curl -fsS http://127.0.0.1:5173/src/types.ts >/dev/null
-          curl -fsS "http://127.0.0.1:5173/src/api.ts" | grep -q "mind-wallet-shared"
+          # O Vite reescreve a importação do pacote compartilhado para o caminho resolvido (/@fs/... ou /node_modules/...).
+          curl -fsS "http://127.0.0.1:5173/src/api.ts" | grep -Eq 'from "/(@fs|node_modules)/[^"]*archive/client\.js"'
+          curl -fsS "http://127.0.0.1:5173/src/types.ts" | grep -Eq 'from "/(@fs|node_modules)/[^"]*archive/types\.js"'
           docker logs atlas 2>&1 | tail -40
           if docker logs atlas 2>&1 | grep -iE "could not be resolved|Pre-transform error"; then
             echo "o servidor do atlas registrou módulo não resolvido" >&2
