@@ -4,7 +4,10 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from contextlib import contextmanager
+from typing import Any, Iterable, Iterator
+
+from mind_shared.config import SQLITE_BUSY_TIMEOUT_MS
 
 
 SCHEMA = """
@@ -102,24 +105,69 @@ CREATE INDEX IF NOT EXISTS idx_entity_chunks_chunk ON entity_chunks(chunk_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_chunk ON feedback(chunk_id);
 """
 
+# Colunas adicionadas depois da primeira versão do esquema. Bancos antigos recebem cada coluna
+# uma vez (ALTER TABLE é idempotente aqui porque conferimos PRAGMA table_info antes).
+MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("workspace_tokens", "id", "ALTER TABLE workspace_tokens ADD COLUMN id TEXT"),
+    ("workspace_tokens", "role", "ALTER TABLE workspace_tokens ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'"),
+    ("workspace_tokens", "expires_at", "ALTER TABLE workspace_tokens ADD COLUMN expires_at TEXT"),
+    ("workspace_tokens", "revoked_at", "ALTER TABLE workspace_tokens ADD COLUMN revoked_at TEXT"),
+    ("workspace_tokens", "last_used_at", "ALTER TABLE workspace_tokens ADD COLUMN last_used_at TEXT"),
+)
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 class Store:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, busy_timeout_ms: int = SQLITE_BUSY_TIMEOUT_MS) -> None:
         self.path = path
+        self.busy_timeout_ms = busy_timeout_ms
         path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         with self.connect() as con:
             con.executescript(SCHEMA)
+            self._migrate(con)
+
+    @staticmethod
+    def _migrate(con: sqlite3.Connection) -> None:
+        for table, column, ddl in MIGRATIONS:
+            present = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+            if column not in present:
+                con.execute(ddl)
+        con.commit()
 
     def connect(self) -> sqlite3.Connection:
-        con = sqlite3.connect(self.path, check_same_thread=False)
+        # WAL (no esquema) permite leituras durante uma escrita; busy_timeout faz escritores
+        # concorrentes esperarem em vez de falhar com "database is locked".
+        con = sqlite3.connect(self.path, check_same_thread=False, timeout=self.busy_timeout_ms / 1000)
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys = ON")
+        con.execute(f"PRAGMA busy_timeout = {int(self.busy_timeout_ms)}")
         return con
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """Escrita atômica: tudo ou nada, com rollback em qualquer exceção."""
+        con = self.conn()
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            yield con
+            con.commit()
+        except BaseException:
+            con.rollback()
+            raise
+
+    def backup(self, destination: Path) -> Path:
+        """Cópia consistente do banco (API de backup do SQLite, válida com WAL e com escritores ativos)."""
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            raise FileExistsError(destination)
+        with sqlite3.connect(destination) as target:
+            self.conn().backup(target)
+        return destination
 
     def conn(self) -> sqlite3.Connection:
         current = getattr(self._local, "conn", None)

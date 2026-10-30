@@ -42,6 +42,36 @@ DEMO_WORKSPACE_SLUG = "atlas-norte"
 DEMO_TOKEN = "mind-demo-atlas-norte"
 TOKEN_HEADER = "X-Mind-Token"
 
+PROFILE_LOCAL = "local"
+PROFILE_REMOTE = "remote"
+DEFAULT_TOKEN_TTL_DAYS = 90
+SQLITE_BUSY_TIMEOUT_MS = 5000
+
+
+def profile() -> str:
+    """`local` (padrão): instalação na máquina do operador, demo e token fixo permitidos.
+    `remote`: instalação exposta; sem token de demo, sem seed automático e criação de
+    espaços só com o token de administração."""
+    raw = os.environ.get("MIND_PROFILE", PROFILE_LOCAL).strip().lower() or PROFILE_LOCAL
+    if raw not in (PROFILE_LOCAL, PROFILE_REMOTE):
+        raise ValueError(f"MIND_PROFILE inválido: {raw!r} (use local ou remote)")
+    return raw
+
+
+def is_remote() -> bool:
+    return profile() == PROFILE_REMOTE
+
+
+def admin_token() -> str | None:
+    """Token de administração da instalação (criação de espaços). Obrigatório em `remote`."""
+    raw = os.environ.get("MIND_ADMIN_TOKEN", "").strip()
+    return raw or None
+
+
+def demo_allowed() -> bool:
+    """Credencial e seed de demonstração só existem no perfil local."""
+    return not is_remote()
+
 
 def composer_backend() -> str:
     return os.environ.get("MIND_COMPOSER_BACKEND", "").strip().lower()

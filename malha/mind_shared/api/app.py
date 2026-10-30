@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, Header, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from mind_shared.api.schemas import (
+    TokenIn,
+    TokenOut,
     AskIn,
     FeedbackIn,
     GraphConflictOut,
@@ -18,15 +21,20 @@ from mind_shared.api.schemas import (
     query_out,
 )
 from mind_shared.config import (
+    DEMO_WORKSPACE_SLUG,
+    admin_token,
     composer_backend,
     composer_gguf_path,
     composer_model,
     composer_url,
     corpus_dir,
     default_db_path,
+    demo_allowed,
     embedding_backend_name,
     embedding_model_name,
+    is_remote,
 )
+from mind_shared.auth.tokens import Role
 from mind_shared.engine import Mesh
 from mind_shared.eval.harness import run_harness
 from mind_shared.ingest.parsers import UnsupportedFormatError
@@ -34,17 +42,24 @@ from mind_shared.types import FeedbackLabel
 
 
 def _ensure_demo_archive(engine: Mesh) -> None:
-    if engine.workspaces.list():
+    """Espaço de demonstração com o corpus de exemplo: só no perfil local."""
+    if not demo_allowed() or engine.workspaces.list():
         return
-    workspace = engine.provision_workspace("atlas-norte", "Arquivo Atlas Norte")
+    workspace = engine.provision_workspace(DEMO_WORKSPACE_SLUG, "Arquivo Atlas Norte")
     engine.ingest_corpus(workspace["id"], corpus_dir())
 
 
+def _require_admin_configured() -> None:
+    if is_remote() and admin_token() is None:
+        raise RuntimeError("MIND_PROFILE=remote exige MIND_ADMIN_TOKEN para criar espaços")
+
+
 def create_app(mesh: Mesh | None = None) -> FastAPI:
+    _require_admin_configured()
     engine = mesh or Mesh(default_db_path())
     if mesh is None:
         _ensure_demo_archive(engine)
-    app = FastAPI(title="Mind Shared", version="0.2.0")
+    app = FastAPI(title="Mind Shared", version="0.3.0")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -67,14 +82,33 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
                 detail="espaço não encontrado",
             ) from exc
 
-    def _authorize(workspace_ref: str, token: str | None) -> str:
+    def _authorize(workspace_ref: str, token: str | None, required: Role = Role.READER) -> str:
+        """Token do próprio espaço (não revogado, não expirado) com papel suficiente.
+        Conhecer o id ou o slug de outro espaço não dá acesso: o token é verificado contra
+        o espaço da URL."""
         workspace_id = _workspace(workspace_ref)
-        if not engine.tokens.verify(workspace_id, token):
+        principal = engine.tokens.authenticate(workspace_id, token)
+        if principal is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="token ausente ou inválido",
             )
+        if not principal.role.allows(required):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"papel {principal.role.value} não permite esta operação (exige {required.value})",
+            )
         return workspace_id
+
+    def _authorize_install_admin(token: str | None) -> None:
+        """Criação de espaços: no perfil remoto exige o token de administração da instalação."""
+        expected = admin_token()
+        if expected is None:
+            if is_remote():
+                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="administração não configurada")
+            return
+        if not token or not secrets.compare_digest(token, expected):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token de administração inválido")
 
     @app.get("/")
     def root() -> dict[str, str]:
@@ -109,7 +143,13 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         return engine.workspaces.list()
 
     @app.post("/workspaces")
-    def create_workspace(body: WorkspaceIn) -> WorkspaceOut:
+    def create_workspace(
+        body: WorkspaceIn,
+        x_mind_admin_token: Annotated[str | None, Header()] = None,
+    ) -> WorkspaceOut:
+        _authorize_install_admin(x_mind_admin_token)
+        if body.slug == DEMO_WORKSPACE_SLUG and not demo_allowed():
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="espaço de demonstração indisponível neste perfil")
         created = engine.provision_workspace(body.slug, body.name)
         return WorkspaceOut(
             id=created["id"],
@@ -164,7 +204,9 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         workspace_id: str,
         x_mind_token: Annotated[str | None, Header()] = None,
     ) -> dict[str, object]:
-        workspace_id = _authorize(workspace_id, x_mind_token)
+        if not demo_allowed():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="seed indisponível neste perfil")
+        workspace_id = _authorize(workspace_id, x_mind_token, Role.EDITOR)
         ingested = engine.ingest_corpus(workspace_id, corpus_dir())
         return {"ingested": ingested}
 
@@ -196,7 +238,7 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
         body: FeedbackIn,
         x_mind_token: Annotated[str | None, Header()] = None,
     ) -> dict[str, str]:
-        workspace_id = _authorize(workspace_id, x_mind_token)
+        workspace_id = _authorize(workspace_id, x_mind_token, Role.EDITOR)
         try:
             feedback_id = engine.mark_feedback(
                 workspace_id,
@@ -210,6 +252,59 @@ def create_app(mesh: Mesh | None = None) -> FastAPI:
                 detail="feedback inválido",
             ) from exc
         return {"feedback_id": feedback_id}
+
+    @app.delete(
+        "/workspaces/{workspace_id}/documents/{document_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        response_class=Response,
+    )
+    def delete_document(
+        workspace_id: str,
+        document_id: str,
+        x_mind_token: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        workspace_id = _authorize(workspace_id, x_mind_token, Role.EDITOR)
+        try:
+            engine.delete_document(workspace_id, document_id)
+        except KeyError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="documento não encontrado") from None
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.get("/workspaces/{workspace_id}/tokens")
+    def list_tokens(
+        workspace_id: str,
+        x_mind_token: Annotated[str | None, Header()] = None,
+    ) -> list[dict[str, str | None]]:
+        workspace_id = _authorize(workspace_id, x_mind_token, Role.ADMIN)
+        return engine.tokens.list(workspace_id)
+
+    @app.post("/workspaces/{workspace_id}/tokens", status_code=status.HTTP_201_CREATED)
+    def create_token(
+        workspace_id: str,
+        body: TokenIn,
+        x_mind_token: Annotated[str | None, Header()] = None,
+    ) -> TokenOut:
+        workspace_id = _authorize(workspace_id, x_mind_token, Role.ADMIN)
+        workspace = engine.workspaces.get(workspace_id)
+        issued = engine.tokens.issue(
+            workspace_id, workspace["slug"], role=Role(body.role), label=body.label, ttl_days=body.ttl_days
+        )
+        return TokenOut(id=issued.id, token=issued.token, role=issued.role.value, label=issued.label, expires_at=issued.expires_at)
+
+    @app.delete(
+        "/workspaces/{workspace_id}/tokens/{token_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        response_class=Response,
+    )
+    def revoke_token(
+        workspace_id: str,
+        token_id: str,
+        x_mind_token: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        workspace_id = _authorize(workspace_id, x_mind_token, Role.ADMIN)
+        if not engine.tokens.revoke(workspace_id, token_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="token não encontrado")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post("/workspaces/{workspace_id}/eval")
     def evaluate(
