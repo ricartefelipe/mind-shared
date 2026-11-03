@@ -595,6 +595,15 @@ components:
           format: date-time
         endToEndId:
           type: string
+          nullable: true
+          minLength: 32
+          maxLength: 32
+          pattern: '^E\d{8}\d{4}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])([01]\d|2[0-3])[0-5]\d[a-zA-Z0-9]{11}$'
+          example: E99999999202611031200aB3dE5gH7jK
+          description: >-
+            Formato do arranjo PIX: E + ISPB + data e hora UTC (yyyyMMddHHmm) + 11 alfanuméricos. O PIX é simulado e
+            o ISPB é fictício (99999999). Gerado quando o PIX é efetivado: ausente enquanto o agendado não executa e
+            no agendado que falhou.
         correlationId:
           type: string
           format: uuid
@@ -603,7 +612,6 @@ components:
         - amountCents
         - status
         - createdAt
-        - endToEndId
         - correlationId
 
     QrPayloadResponse:

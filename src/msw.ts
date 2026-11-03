@@ -1,4 +1,5 @@
 import { http, HttpResponse, type RequestHandler } from 'msw'
+import { createEndToEndId } from './endToEndId.js'
 import { assertValidPixKey, type PixKeyType } from './pixKey.js'
 import { buildQrPayload } from './qrPayload.js'
 
@@ -56,7 +57,8 @@ type Transfer = {
   status: TransferStatus
   createdAt: string
   scheduledFor?: string
-  endToEndId: string
+  /** Formato do arranjo PIX, com ISPB fictício; só existe depois que o PIX é efetivado. */
+  endToEndId?: string
   correlationId: string
 }
 
@@ -272,10 +274,20 @@ function resolveTransferCounterparty(db: Db, transfer: Transfer): string {
   return transfer.pixKey ?? 'Destinatário'
 }
 
+/** O código nasce quando o PIX é efetivado; um novo sorteio cobre a colisão, improvável, com um já emitido. */
+function uniqueEndToEndId(db: Db, date: Date): string {
+  let id = createEndToEndId(date)
+  while (db.transfers.some((item) => item.endToEndId === id)) {
+    id = createEndToEndId(date)
+  }
+  return id
+}
+
 function completeTransfer(db: Db, transfer: Transfer, nowIso: string): void {
   db.availableCents -= transfer.amountCents
   db.dailySpentCents += transfer.amountCents
   transfer.status = 'COMPLETED'
+  transfer.endToEndId ??= uniqueEndToEndId(db, new Date(nowIso))
   const counterparty = resolveTransferCounterparty(db, transfer)
   db.transactions.unshift({
     id: crypto.randomUUID(),
@@ -583,7 +595,7 @@ export function createMindHandlers(options: MindHandlerOptions = {}): RequestHan
         status: isScheduled ? 'SCHEDULED' : 'COMPLETED',
         createdAt: nowIso,
         ...(scheduledFor ? { scheduledFor } : {}),
-        endToEndId: `E${crypto.randomUUID().replace(/-/g, '').slice(0, 32)}`,
+        ...(isScheduled ? {} : { endToEndId: uniqueEndToEndId(db, now) }),
         correlationId: requestCorrelationId,
       }
 
