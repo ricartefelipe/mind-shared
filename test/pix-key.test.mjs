@@ -14,8 +14,39 @@ test('EMAIL rejeita endereço inválido', () => {
   )
 })
 
-test('CPF aceita 11 dígitos', () => {
-  assert.doesNotThrow(() => assertValidPixKey('CPF', '12345678901'))
+test('CPF aceita 11 dígitos com dígitos verificadores válidos', () => {
+  assert.doesNotThrow(() => assertValidPixKey('CPF', '52998224725'))
+})
+
+test('CPF rejeita dígito verificador errado e dígitos repetidos', () => {
+  for (const key of ['52998224724', '12345678901', '11111111111']) {
+    assert.throws(
+      () => assertValidPixKey('CPF', key),
+      (error) => error instanceof Error && error.message.includes('INVALID_PIX_KEY'),
+      key,
+    )
+  }
+})
+
+test('CNPJ aceita numérico e alfanumérico com dígitos verificadores válidos', () => {
+  assert.doesNotThrow(() => assertValidPixKey('CNPJ', '11222333000181'))
+  // Exemplo publicado pela Receita Federal para o CNPJ alfanumérico.
+  assert.doesNotThrow(() => assertValidPixKey('CNPJ', '12ABC34501DE35'))
+})
+
+test('CNPJ rejeita dígito errado, máscara, minúsculas e repetidos', () => {
+  for (const key of ['11222333000182', '11.222.333/0001-81', '12abc34501de35', '00000000000000', '1122233300018']) {
+    assert.throws(
+      () => assertValidPixKey('CNPJ', key),
+      (error) => error instanceof Error && error.message.includes('INVALID_PIX_KEY'),
+      key,
+    )
+  }
+})
+
+test('CNPJ não passa como CPF nem como chave aleatória', () => {
+  assert.throws(() => assertValidPixKey('CPF', '11222333000181'))
+  assert.throws(() => assertValidPixKey('RANDOM', '11222333000181'))
 })
 
 test('CPF rejeita formato inválido', () => {
@@ -37,10 +68,14 @@ test('PHONE rejeita formato inválido', () => {
   )
 })
 
-test('RANDOM aceita 32 hex', () => {
+test('RANDOM aceita UUID com ou sem hífens', () => {
   assert.doesNotThrow(() =>
     assertValidPixKey('RANDOM', 'a1b2c3d4e5f6789012345678abcdef01'),
   )
+  assert.doesNotThrow(() =>
+    assertValidPixKey('RANDOM', '123e4567-e89b-12d3-a456-426614174000'),
+  )
+  assert.throws(() => assertValidPixKey('RANDOM', '123e4567-e89b12d3a456426614174000'))
 })
 
 test('RANDOM rejeita formato inválido', () => {

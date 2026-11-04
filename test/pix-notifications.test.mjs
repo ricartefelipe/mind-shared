@@ -3,8 +3,8 @@ import test from 'node:test'
 import { setupServer } from 'msw/node'
 import { createMindHandlers } from '../dist/msw.js'
 
-function createServer() {
-  const server = setupServer(...createMindHandlers())
+function createServer(options = {}) {
+  const server = setupServer(...createMindHandlers(options))
   server.listen({ onUnhandledRequest: 'error' })
   return server
 }
@@ -102,10 +102,11 @@ test('retry com mesma Idempotency-Key devolve a mesma transferência sem debitar
 })
 
 test('PIX agendado não debita até o GET de balance processar o vencimento', async (t) => {
-  const server = createServer()
+  let agora = new Date('2026-11-04T12:00:00Z')
+  const server = createServer({ now: () => agora })
   t.after(() => server.close())
 
-  const future = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+  const future = new Date(agora.getTime() + 60 * 60 * 1000).toISOString()
   const createFuture = await fetch('http://mind.local/api/v1/transfers/pix', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -124,22 +125,27 @@ test('PIX agendado não debita até o GET de balance processar o vencimento', as
   assert.equal(balance.availableCents, 250_000)
   assert.equal(balance.dailySpentCents, 0)
 
-  const past = new Date(Date.now() - 60_000).toISOString()
-  const createPast = await fetch('http://mind.local/api/v1/transfers/pix', {
+  // Com fuso: o vencimento compara instantes, não o texto da data.
+  const emCincoMinutos = '2026-11-04T09:05:00-03:00'
+  const createSoon = await fetch('http://mind.local/api/v1/transfers/pix', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       pixKey: 'destino@email.com',
       pixKeyType: 'EMAIL',
       amountCents: 15_000,
-      scheduledFor: past,
+      scheduledFor: emCincoMinutos,
     }),
   })
-  assert.equal(createPast.status, 201)
-  const pastTransfer = await createPast.json()
+  assert.equal(createSoon.status, 201)
+  const pastTransfer = await createSoon.json()
   assert.equal(pastTransfer.status, 'SCHEDULED')
   assert.equal(pastTransfer.beneficiaryId, undefined)
 
+  balance = await getBalance()
+  assert.equal(balance.availableCents, 250_000)
+
+  agora = new Date(agora.getTime() + 10 * 60 * 1000)
   balance = await getBalance()
   assert.equal(balance.availableCents, 235_000)
   assert.equal(balance.dailySpentCents, 15_000)
@@ -242,4 +248,45 @@ test('qr-payload devolve payload determinístico', async (t) => {
   assert.deepEqual(await response.json(), {
     payload: 'MINDPIX|v1|ana@email.com|1500',
   })
+})
+
+test('PIX agendado no passado ou além de 365 dias responde 400', async (t) => {
+  const agora = new Date('2026-11-04T12:00:00Z')
+  const server = createServer({ now: () => agora })
+  t.after(() => server.close())
+
+  const agendar = (scheduledFor) =>
+    fetch('http://mind.local/api/v1/transfers/pix', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ beneficiaryId: 'b1', amountCents: 1_000, scheduledFor }),
+    })
+
+  const noPassado = await agendar(new Date(agora.getTime() - 60_000).toISOString())
+  assert.equal(noPassado.status, 400)
+  assert.equal((await noPassado.json()).code, 'SCHEDULE_IN_PAST')
+
+  const agoraMesmo = await agendar(agora.toISOString())
+  assert.equal(agoraMesmo.status, 400)
+  assert.equal((await agoraMesmo.json()).code, 'SCHEDULE_IN_PAST')
+
+  const umAno = 365 * 24 * 60 * 60 * 1000
+  const longe = await agendar(new Date(agora.getTime() + umAno + 1_000).toISOString())
+  assert.equal(longe.status, 400)
+  assert.equal((await longe.json()).code, 'SCHEDULE_TOO_FAR')
+
+  const noLimite = await agendar(new Date(agora.getTime() + umAno).toISOString())
+  assert.equal(noLimite.status, 201)
+  assert.equal((await noLimite.json()).status, 'SCHEDULED')
+})
+
+test('favorecido de demonstração Mercado Central tem chave CNPJ', async (t) => {
+  const server = createServer()
+  t.after(() => server.close())
+
+  const response = await fetch('http://mind.local/api/v1/beneficiaries')
+  const { items } = await response.json()
+  const mercado = items.find((b) => b.id === 'b2')
+  assert.equal(mercado.pixKeyType, 'CNPJ')
+  assert.equal(mercado.pixKey, '11222333000181')
 })
