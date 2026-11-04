@@ -86,7 +86,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/trivy-cache"
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RUNNER_TEMP/trivy-cache:/root/.cache" \
-            aquasec/trivy:0.76.1 image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --skip-version-check mind-shared-api:ci
+            aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --skip-version-check mind-shared-api:ci
       - name: Remote profile refuses to start without an admin token
         run: |
           set +e
