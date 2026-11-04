@@ -235,7 +235,7 @@ paths:
         '400':
           description: >
             Requisição inválida (VALIDATION_ERROR, INVALID_PIX_KEY,
-            BENEFICIARY_NOT_FOUND).
+            BENEFICIARY_NOT_FOUND, SCHEDULE_IN_PAST, SCHEDULE_TOO_FAR).
           content:
             application/json:
               schema:
@@ -521,7 +521,11 @@ components:
 
     PixKeyType:
       type: string
-      enum: [EMAIL, CPF, PHONE, RANDOM]
+      description: >
+        CPF e CNPJ só com dígitos (o CNPJ aceita o formato alfanumérico) e com
+        dígitos verificadores válidos; RANDOM é a chave aleatória (EVP), um UUID
+        com ou sem hífens.
+      enum: [EMAIL, CPF, CNPJ, PHONE, RANDOM]
 
     Beneficiary:
       type: object
@@ -552,7 +556,9 @@ components:
       description: >
         amountCents é obrigatório. Destino é XOR: informe beneficiaryId OU o
         par pixKey + pixKeyType (nunca ambos, nunca nenhum). scheduledFor
-        opcional agenda a transferência para o futuro (status SCHEDULED).
+        opcional agenda a transferência para o futuro (status SCHEDULED): a
+        data precisa ser no futuro (SCHEDULE_IN_PAST) e no máximo 365 dias à
+        frente (SCHEDULE_TOO_FAR).
       properties:
         amountCents:
           type: integer

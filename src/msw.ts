@@ -7,6 +7,8 @@ export type MindHandlerOptions = {
   apiBasePath?: string
   systemSlug?: string
   users?: MindUserStore
+  /** Relógio do PIX agendado; os testes passam um relógio que eles avançam. */
+  now?: () => Date
 }
 
 export type MindUser = {
@@ -129,7 +131,7 @@ function createDb(): Db {
     dailySpentCents: 0,
     beneficiaries: [
       { id: 'b1', name: 'Ana Silva', pixKey: 'ana@email.com', pixKeyType: 'EMAIL' },
-      { id: 'b2', name: 'Mercado Central', pixKey: '11222333000', pixKeyType: 'CPF' },
+      { id: 'b2', name: 'Mercado Central', pixKey: '11222333000181', pixKeyType: 'CNPJ' },
     ],
     transactions: [
       {
@@ -307,11 +309,15 @@ function completeTransfer(db: Db, transfer: Transfer, nowIso: string): void {
   })
 }
 
-function processDueScheduledTransfers(db: Db, now = new Date()): void {
+/** Até quando um PIX pode ser agendado (a mesma regra da vuemind-api e do SpringMind). */
+const MAX_SCHEDULE_AHEAD_MS = 365 * 24 * 60 * 60 * 1000
+
+function processDueScheduledTransfers(db: Db, now: Date): void {
   const nowIso = now.toISOString()
   for (const transfer of db.transfers) {
     if (transfer.status !== 'SCHEDULED' || !transfer.scheduledFor) continue
-    if (transfer.scheduledFor > nowIso) continue
+    // Compara instantes, não texto: a data pode chegar com outro fuso, como 2026-11-04T10:00:00-03:00.
+    if (new Date(transfer.scheduledFor).getTime() > now.getTime()) continue
     if (db.availableCents < transfer.amountCents) {
       transfer.status = 'FAILED'
       db.notifications.unshift({
@@ -340,6 +346,7 @@ function processDueScheduledTransfers(db: Db, now = new Date()): void {
 
 export function createMindHandlers(options: MindHandlerOptions = {}): RequestHandler[] {
   const apiBasePath = options.apiBasePath ?? '/api/v1'
+  const clock = options.now ?? (() => new Date())
   const db = createDb()
   if (options.users) {
     db.users = options.users
@@ -384,7 +391,7 @@ export function createMindHandlers(options: MindHandlerOptions = {}): RequestHan
       }
     }),
     http.get(endpoint(apiBasePath, '/wallet/balance'), () => {
-      processDueScheduledTransfers(db)
+      processDueScheduledTransfers(db, clock())
       return HttpResponse.json({
         availableCents: db.availableCents,
         blockedCents: db.blockedCents,
@@ -549,7 +556,7 @@ export function createMindHandlers(options: MindHandlerOptions = {}): RequestHan
         counterparty = body.pixKey!
       }
 
-      const now = new Date()
+      const now = clock()
       const nowIso = now.toISOString()
       const scheduledFor =
         typeof body.scheduledFor === 'string' && body.scheduledFor.length > 0
@@ -558,6 +565,22 @@ export function createMindHandlers(options: MindHandlerOptions = {}): RequestHan
       if (scheduledFor && Number.isNaN(new Date(scheduledFor).getTime())) {
         return HttpResponse.json(
           error('VALIDATION_ERROR', 'scheduledFor deve ser uma data/hora válida.', requestCorrelationId),
+          { status: 400 },
+        )
+      }
+      if (scheduledFor && new Date(scheduledFor).getTime() <= now.getTime()) {
+        return HttpResponse.json(
+          error('SCHEDULE_IN_PAST', 'A data do agendamento precisa ser no futuro.', requestCorrelationId),
+          { status: 400 },
+        )
+      }
+      if (scheduledFor && new Date(scheduledFor).getTime() > now.getTime() + MAX_SCHEDULE_AHEAD_MS) {
+        return HttpResponse.json(
+          error(
+            'SCHEDULE_TOO_FAR',
+            'O PIX pode ser agendado para até 365 dias a partir de agora.',
+            requestCorrelationId,
+          ),
           { status: 400 },
         )
       }
