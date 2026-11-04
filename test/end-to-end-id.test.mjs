@@ -4,8 +4,8 @@ import { setupServer } from 'msw/node'
 import { createEndToEndId, DEMO_ISPB, END_TO_END_ID_PATTERN } from '../dist/endToEndId.js'
 import { createMindHandlers } from '../dist/msw.js'
 
-function createServer() {
-  const server = setupServer(...createMindHandlers())
+function createServer(options = {}) {
+  const server = setupServer(...createMindHandlers(options))
   server.listen({ onUnhandledRequest: 'error' })
   return server
 }
@@ -54,14 +54,16 @@ test('PIX imediato devolve end-to-end no formato; repetir com a mesma chave mant
 })
 
 test('PIX agendado só recebe o end-to-end quando é executado', async (t) => {
-  const server = createServer()
+  let agora = new Date('2026-11-04T12:00:00Z')
+  const server = createServer({ now: () => agora })
   t.after(() => server.close())
 
-  const past = new Date(Date.now() - 60_000).toISOString()
-  const created = await (await pix({ beneficiaryId: 'b1', amountCents: 2_000, scheduledFor: past })).json()
+  const daquiAUmMinuto = new Date(agora.getTime() + 60_000).toISOString()
+  const created = await (await pix({ beneficiaryId: 'b1', amountCents: 2_000, scheduledFor: daquiAUmMinuto })).json()
   assert.equal(created.status, 'SCHEDULED')
   assert.equal(created.endToEndId, undefined)
 
+  agora = new Date(agora.getTime() + 2 * 60_000)
   await fetch('http://mind.local/api/v1/wallet/balance')
 
   const executed = await (await fetch(`http://mind.local/api/v1/transfers/${created.id}`)).json()
